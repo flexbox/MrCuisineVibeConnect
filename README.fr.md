@@ -2,6 +2,13 @@
 
 🇬🇧 **[English version](README.md)**
 
+> **Version macOS.** Ceci est une copie de [Wuki60/MrCuisineVibeConnect](https://github.com/Wuki60/MrCuisineVibeConnect)
+> dont les outils d'installation tournent sur un **Mac** : des scripts shell au lieu de PowerShell,
+> et [mtkclient](https://github.com/bkerler/mtkclient) au lieu de SP Flash Tool et de son pilote
+> Windows. L'appli Toque est inchangée et se met toujours à jour depuis les versions du dépôt
+> d'origine. Les étapes en mode téléchargement depuis macOS n'ont été testées que sur un robot
+> simulé ; voir [AGENTS.md](AGENTS.md).
+
 **Toque**, une interface moderne et rapide pour le robot **Monsieur Cuisine Connect** (SKMC 1200),
 qui remplace l'appli d'origine sur la tablette du robot tout en gardant **les recettes Lidl**.
 
@@ -12,22 +19,23 @@ qui remplace l'appli d'origine sur la tablette du robot tout en gardant **les re
 
 ## Installer avec un agent IA
 
-Le plus simple : confiez l'installation à un agent IA qui peut piloter votre PC Windows (Claude,
+Le plus simple : confiez l'installation à un agent IA qui peut piloter votre Mac (Claude,
 ChatGPT, Copilot…). Donnez-lui ce message :
 
-> Installe Toque sur mon Monsieur Cuisine Connect en suivant le fichier AGENTS.md de
-> https://github.com/Wuki60/MrCuisineVibeConnect
+> Installe Toque sur mon Monsieur Cuisine Connect depuis ce Mac en suivant le fichier AGENTS.md de
+> [dossier ou URL de ce dépôt]
 
 Le fichier [AGENTS.md](AGENTS.md) lui décrit toute la procédure, et le script
-[`tools/setup/toque-setup.ps1`](tools/setup/toque-setup.ps1) fait le travail étape par étape
-(téléchargements vérifiés, pilote, sauvegarde, root, installation, ADB par Wi-Fi). L'agent ne vous
+[`tools/setup/toque-setup.sh`](tools/setup/toque-setup.sh) fait le travail étape par étape
+(téléchargements vérifiés, sauvegarde, root, installation, ADB par Wi-Fi). L'agent ne vous
 demande que ce qu'il ne peut pas faire lui-même :
 
-- avoir un câble **USB-A mâle ↔ USB-A mâle** et un petit tournevis Torx ;
+- avoir un câble **USB-A mâle ↔ USB-A mâle** (plus un adaptateur USB-C → USB-A si le Mac n'a que
+  des ports USB-C) et un petit tournevis Torx ;
 - dévisser la trappe sous le robot, brancher le câble sur le port **« Android USB »**, éteindre et
   rallumer le robot quand il le dit ;
-- répondre aux fenêtres de sécurité de Windows (et, si besoin, désactiver l'intégrité de la mémoire
-  le temps de l'installation) ;
+- accepter les paquets Homebrew (Python, libusb) et cliquer sur **Autoriser** si macOS demande
+  d'autoriser un nouvel accessoire ;
 - appuyer une fois sur **Autoriser** sur l'écran du robot.
 
 Comptez 1 à 2 heures. Sans agent : [docs/INSTALLATION.fr.md](docs/INSTALLATION.fr.md).
@@ -92,8 +100,10 @@ app/    Appli Android (minSdk 23), sans AndroidX
         machine/   service de pilotage (processus « :machine ») et IPC
         recipes/   catalogue local, synchro Lidl
         ui/        écrans
-tools/  setup/toque-setup.ps1 (installation complète, pilotable par un agent IA), scripts de root (TWRP),
-        d'installation, de restauration et de publication, twin.py (jumeau numérique pour tester sur PC)
+tools/  setup/toque-setup.sh (installation complète depuis un Mac, pilotable par un agent IA), robot/
+        (scripts lancés sur le robot : root, écriture depuis TWRP, restauration), scripts
+        d'installation, de restauration et de publication (.sh pour macOS, les .ps1 d'origine pour
+        Windows), twin.py (jumeau numérique pour tester)
 docs/   INSTALLATION.md (EN), INSTALLATION.fr.md (FR)
 AGENTS.md  procédure d'installation pour un agent IA
 ```
@@ -104,7 +114,10 @@ Ouvrir le dossier dans **Android Studio**, attendre la synchronisation Gradle, p
 **Build › Build App Bundle(s) / APK(s) › Build APK(s)**. L'APK est dans
 `app/build/outputs/apk/debug/`.
 
-En ligne de commande : `gradlew assembleDebug` (et `gradlew :core:test` pour les tests).
+En ligne de commande : `./gradlew assembleDebug` (et `./gradlew :core:test` pour les tests). Gradle
+demande le JDK 17 ou 21 ; avec un JDK par défaut plus récent, la compilation s'arrête avec un simple
+numéro de version comme erreur. Le JDK d'Android Studio convient :
+`export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"`.
 
 ## Tester sans le robot
 
@@ -114,9 +127,9 @@ En ligne de commande : `gradlew assembleDebug` (et `gradlew :core:test` pour les
    Réglages › Recettes Lidl › Synchroniser télécharge les recettes sur n'importe quel appareil.
 2. **Jumeau numérique** : le jumeau du [Monsieur Cuisine Developer SDK](https://github.com/antrea/monsieur-cuisine-developer-sdk)
    reproduit le protocole réel indépendamment de Toque.
-   `python tools/twin.py --sdk <dossier du SDK>` puis, dans Toque, Réglages › Machine ›
+   `python3 tools/twin.py --sdk <dossier du SDK>` puis, dans Toque, Réglages › Machine ›
    Jumeau (émulateur : hôte `10.0.2.2` ; appareil réel : `adb reverse tcp:8765 tcp:8765` et
-   hôte `127.0.0.1`). `python tools/twin.py --send "lid 1"` ouvre le couvercle, etc.
+   hôte `127.0.0.1`). `python3 tools/twin.py --send "lid 1"` ouvre le couvercle, etc.
 
 ## Ajouter une langue
 
@@ -129,7 +142,7 @@ L'appli est écrite en français ; chaque autre langue est un fichier dans
 2. Recompiler l'appli, ou, sans recompiler, copier le fichier dans `Android/data/app.toque/files/lang/`
    sur l'appareil puis relancer Toque.
 
-La langue apparaît alors dans Réglages › Langue · Language. `gradlew :core:test` vérifie chaque
+La langue apparaît alors dans Réglages › Langue · Language. `./gradlew :core:test` vérifie chaque
 fichier de langue.
 
 ## Publier une nouvelle version
@@ -144,21 +157,23 @@ Toutes les compilations sont signées avec la clé du projet (`app/signature/`, 
 compilé sur n'importe quel PC ou par GitHub s'installe par-dessus la version précédente. N'installez que
 les APK publiés sur ce dépôt.
 
-Sans GitHub Actions : `gradlew assembleRelease`, puis
-`powershell -ExecutionPolicy Bypass -File tools\publish-release.ps1 -Apk app\build\outputs\apk\release\app-release.apk`
-crée la version `vX.Y.Z` et y joint l'APK (jeton GitHub : `GH_TOKEN`, `gh`, ou les identifiants déjà
-enregistrés pour git).
+Sans GitHub Actions : `./gradlew assembleRelease`, puis
+`bash tools/publish-release.sh --apk app/build/outputs/apk/release/app-release.apk [--repo propriétaire/nom]`
+crée la version `vX.Y.Z` et y joint l'APK (il faut `gh` ; jeton GitHub : `GH_TOKEN`, `gh auth login`,
+ou les identifiants déjà enregistrés pour git ; `--dry-run` montre seulement ce qu'il ferait).
 
 ## Installer sur le robot
 
 Avec un agent IA : **[AGENTS.md](AGENTS.md)** (voir plus haut). À la main :
 **[docs/INSTALLATION.fr.md](docs/INSTALLATION.fr.md)** : root, installation, premier essai à vide,
-synchronisation des recettes, retour à l'appli d'origine.
+synchronisation des recettes, retour à l'appli d'origine. Depuis Windows, suivre le guide du dépôt
+d'origine.
 
 ## Crédits
 
 - Protocole : [Monsieur Cuisine Developer SDK](https://github.com/antrea/monsieur-cuisine-developer-sdk) (MIT).
 - Accès au robot : [Monsieur-Cuisine-Connect-Hack](https://github.com/EliasKotlyar/Monsieur-Cuisine-Connect-Hack).
+- Mode téléchargement MediaTek sous macOS : [mtkclient](https://github.com/bkerler/mtkclient) (GPLv3, téléchargé par `prepare`, non inclus).
 
 Licence MIT. Ce dépôt ne contient aucune recette, image ni code de Lidl : chaque robot télécharge
 lui-même les recettes sur monsieur-cuisine.com, pour l'usage personnel de son propriétaire.

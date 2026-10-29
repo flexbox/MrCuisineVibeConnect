@@ -1,0 +1,17 @@
+# Python packages for mtkclient v2.1.4.1 (command line only), pinned with their SHA-256.
+# toque-setup.sh 'prepare' installs them into a private virtual environment:
+#   pip install --require-hashes --only-binary=:all: --no-deps -r mtkclient-requirements.txt
+# Left out on purpose: PySide6 (graphical interface only) and fusepy (mounting the flash as a disk
+# only): without macFUSE, fusepy stops mtkclient from starting (bkerler/mtkclient#384).
+pyusb==1.3.1 \
+    --hash=sha256:bf9b754557af4717fe80c2b07cc2b923a9151f5c08d17bdb5345dac09d6a0430
+pyserial==3.5 \
+    --hash=sha256:c4451db6ba391ca6ca299fb3ec7bae67a5c55dde170964c7a14ceefec02f2cf0
+pycryptodome==3.24.1 \
+    --hash=sha256:558b9233ff2afb42f92115ae9b4414d08c0e567790619e878cf72947d7c38a11 \
+    --hash=sha256:a089e49fcaa978302447b2e63118b2b0f366a25e914c5d7ac8c30b3e5cc61e3a
+pycryptodomex==3.24.1 \
+    --hash=sha256:9bb353c764c144a9fc03302ef3763ad0c3e75bc7ca41f445cc98455f36da6c59 \
+    --hash=sha256:eeac2c9acbd2d9f0ca493fdf692ce8245ca37cbebee08c496025868d4b8ef70f
+colorama==0.4.6 \
+    --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6

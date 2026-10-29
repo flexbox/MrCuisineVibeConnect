@@ -2,13 +2,13 @@
 # Prepares the robot for Toque. Run it in TWRP, as root:
 #   adb push Magisk-vXX.apk /tmp/magisk.apk
 #   adb push boot-original.img /tmp/boot.img        (your backup of the original boot)
-#   adb push %USERPROFILE%\.android\adbkey.pub /tmp/adbkey.pub   (optional)
-#   adb push tools\robot\twrp-root.sh /tmp/
+#   adb push ~/.android/adbkey.pub /tmp/adbkey.pub   (optional; Windows: %USERPROFILE%\.android\adbkey.pub)
+#   adb push tools/robot/twrp-root.sh /tmp/
 #   adb shell sh /tmp/twrp-root.sh
 #   adb pull /tmp/magisk/new-boot.img boot-magisk.img
 #
 # 1. Patches the original boot with official Magisk -> /tmp/magisk/new-boot.img (nothing is
-#    flashed: flash it into "boot" with SP Flash Tool afterwards).
+#    flashed: write it into "boot" afterwards, from TWRP with twrp-flash.sh or with SP Flash Tool).
 # 2. Enables ADB in Android (/system/build.prop) and deletes /system/recovery-from-boot.p, which
 #    would otherwise put the stock recovery back over TWRP. Copies of the originals: /tmp/orig.
 # 3. Optionally authorizes the PC's ADB key, so no prompt is needed on the robot's screen.

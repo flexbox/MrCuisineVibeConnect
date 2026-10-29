@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# Run as root on the robot (tools\install-robot.ps1 does it after installing Toque).
+# Run as root on the robot (tools/install-robot.sh or install-robot.ps1 does it after installing Toque).
 # 1. Allows Toque in Magisk, without the on-screen prompt: that prompt closes by itself after
 #    10 s and Magisk then refuses Toque for good (the robot has no way to reach Magisk's settings).
 # 2. Makes sure Magisk's busybox is in /data/adb/magisk: Toque needs it for the serial port.
