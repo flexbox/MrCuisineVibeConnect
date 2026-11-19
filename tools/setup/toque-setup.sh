@@ -574,7 +574,8 @@ step_install() {
   [ -n "$apk" ] && [ -f "$apk" ] || fail "No Toque APK: run 'prepare' (downloads the latest release) or pass --apk <file>."
   resolve_adb
   if [ -n "$IP" ]; then ADB="$ADB" "$REPO/tools/install-robot.sh" --apk "$apk" --ip "$IP"
-  else ADB="$ADB" "$REPO/tools/install-robot.sh" --apk "$apk"; fi
+  else ADB="$ADB" "$REPO/tools/install-robot.sh" --apk "$apk"; fi ||
+    fail "Toque installation failed. Read the error above, then run 'install' again."
   ver=$(adb_run shell "dumpsys package app.toque | grep versionName")
   case "$ver" in *versionName*) ;; *) fail "Toque is not installed." ;; esac
   state_set done-install "$(now)"

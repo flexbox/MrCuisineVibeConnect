@@ -3,6 +3,7 @@
 # Usage: tools/install-robot.sh [--apk path.apk] [--ip 192.168.1.x]
 # adb: $ADB if set, else the Android SDK's, else the one on the PATH.
 set -u
+set -o pipefail
 REPO=$(cd "$(dirname "$0")/.." && pwd -P)
 APK="$REPO/app/build/outputs/apk/debug/app-debug.apk"
 IP=""
@@ -34,10 +35,27 @@ if [ "$root" != 0 ]; then echo "No root access: install Magisk first (see docs/I
 
 echo "Installing Toque..."
 adb_ install -r "$APK" || { echo "Installation failed."; exit 1; }
-adb_ push "$REPO/tools/robot/restore.sh" /data/local/tmp/toque-restore.sh > /dev/null
-adb_ push "$REPO/tools/robot/setup-root.sh" /data/local/tmp/toque-setup-root.sh > /dev/null
-adb_ shell "su -c 'sh /data/local/tmp/toque-setup-root.sh'"
-adb_ shell am start -n app.toque/.ui.MainActivity > /dev/null
+adb_ push "$REPO/tools/robot/restore.sh" /data/local/tmp/toque-restore.sh > /dev/null ||
+  { echo "Could not copy the restore script to the robot." >&2; exit 1; }
+adb_ push "$REPO/tools/robot/setup-root.sh" /data/local/tmp/toque-setup-root.sh > /dev/null ||
+  { echo "Could not copy the root setup script to the robot." >&2; exit 1; }
+# Android 6's legacy adb shell can return 0 even when the remote command fails.
+# Emit the status inside su, so a denied/missing su cannot fake a successful root setup.
+setup_output=$(adb_ shell "su -c 'sh /data/local/tmp/toque-setup-root.sh; toque_status=\$?; echo TOQUE_ROOT_SETUP_STATUS=\$toque_status; exit \$toque_status'" 2>&1 | tr -d '\r') ||
+  { printf '%s\n' "$setup_output" >&2; echo "Could not configure Toque's root access." >&2; exit 1; }
+printf '%s\n' "$setup_output"
+[ "$(printf '%s\n' "$setup_output" | tail -n 1)" = TOQUE_ROOT_SETUP_STATUS=0 ] ||
+  { echo "Could not verify Toque's root setup result." >&2; exit 1; }
+
+# am can also report an Activity Manager error in its output without a failing exit code.
+start_output=$(adb_ shell "am start -W -n app.toque/.ui.MainActivity; toque_status=\$?; echo TOQUE_START_STATUS=\$toque_status; exit \$toque_status" 2>&1 | tr -d '\r') ||
+  { printf '%s\n' "$start_output" >&2; echo "Could not start Toque." >&2; exit 1; }
+if [ "$(printf '%s\n' "$start_output" | tail -n 1)" != TOQUE_START_STATUS=0 ] ||
+    ! printf '%s\n' "$start_output" | grep -qx 'Status: ok'; then
+  printf '%s\n' "$start_output" >&2
+  echo "Could not confirm that Toque started." >&2
+  exit 1
+fi
 echo ""
 echo "Toque is running. On the robot:"
 echo "  1. Settings > Machine > Real machine > Apply (first test: EMPTY bowl)."
