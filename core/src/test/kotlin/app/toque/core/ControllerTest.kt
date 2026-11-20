@@ -107,6 +107,18 @@ class ControllerTest {
         val v = b.c.startJob(Programs.manual(3, 0, Direction.CLOCKWISE, 5_000))
         assertFalse(v.ok)
         assertTrue(v.has("lid"))
+        assertEquals("Fermez et verrouillez le couvercle", v.violations.first { it.code == "lid" }.message)
+    }
+
+    @Test fun refusalSaysWhenTheBowlIsMissing() {
+        val b = Bench().ready()
+        b.board.lidOpen = true
+        b.board.bowlPresent = false
+        b.step(200)
+        val v = b.c.startJob(Programs.manual(3, 0, Direction.CLOCKWISE, 5_000))
+        assertTrue(v.has("lid"))
+        assertEquals("Remettez le bol et verrouillez le couvercle", v.violations.first { it.code == "lid" }.message)
+        assertTrue(b.snap.bowlRemoved)
     }
 
     @Test fun lidOpeningPausesAndNothingRestartsAlone() {
@@ -352,5 +364,40 @@ class ControllerTest {
         assertEquals(0xA9, frame[4].toInt() and 0xFF)
         assertEquals(0, b.c.tick()[4].toInt())
         assertEquals(Mcc.TX_SIZE, frame.size)
+    }
+
+    /** Trames relevées sur un vrai SKMC 1200 (base 4922), à froid, dans les trois positions du bol. */
+    @Test fun bowlRemovedIsToldApartFromLidOpen() {
+        fun frame(hex: String) = Mcc.decodeRx(Mcc.parseHex(hex))
+        val closed = frame("55 1B B1 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 13 3A 02 00 00 74 AA")
+        val lidOpen = frame("55 1B B1 84 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 13 3A 02 00 00 F9 AA")
+        val noBowl = frame("55 1B B1 C4 00 00 00 00 00 00 00 00 00 00 00 00 FF FF F7 77 13 3A 02 00 00 A0 AA")
+        assertEquals(listOf(false, true, true), listOf(closed, lidOpen, noBowl).map { it.lidOpen })
+        assertEquals(listOf(false, false, true), listOf(closed, lidOpen, noBowl).map { it.bowlMissing })
+        assertEquals(-2185, noBowl.weight)
+
+        val open = app.toque.core.machine.Snapshot(hasSample = true, lidOpen = true, bowlDetected = true)
+        assertFalse(open.bowlRemoved)
+        assertTrue(open.copy(bowlDetected = false).bowlRemoved)
+        assertFalse(open.copy(hasSample = false, bowlDetected = false).bowlRemoved)
+    }
+
+    @Test fun zeroDegreesIsNotATemperature() {
+        val cold = app.toque.core.machine.Snapshot(hasSample = true, actualTempC = 0)
+        assertFalse(cold.temperatureKnown)
+        assertTrue(cold.copy(actualTempC = 37).temperatureKnown)
+        assertFalse(cold.copy(hasSample = false, actualTempC = 37).temperatureKnown)
+    }
+
+    @Test fun requiringTheBowlRefusesWithoutIt() {
+        val b = Bench(ControllerConfig(requireBowl = true)).ready()
+        assertTrue(b.snap.bowlDetected)
+        assertTrue(b.c.startJob(Programs.manual(3, 0, Direction.CLOCKWISE, 5_000)).ok)
+        b.c.stop()
+        b.step(2_000)
+        b.board.bowlPresent = false
+        b.step(200)
+        assertFalse(b.snap.bowlDetected)
+        assertTrue(b.c.startJob(Programs.manual(3, 0, Direction.CLOCKWISE, 5_000)).has("bowl"))
     }
 }

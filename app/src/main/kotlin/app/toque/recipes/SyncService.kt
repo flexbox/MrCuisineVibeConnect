@@ -8,22 +8,30 @@ import android.content.Context
 import android.content.Intent
 import android.os.SystemClock
 import app.toque.Prefs
+import app.toque.TimeSync
 import app.toque.ToqueApp
 import app.toque.machine.MachineService
 import app.toque.ui.MainActivity
 import java.util.Calendar
 
-/** Synchro nocturne des recettes (03 h 30) depuis monsieur-cuisine.com. */
+/** Synchro nocturne des recettes (03 h 30) depuis monsieur-cuisine.com, puis cookomix.com. */
 @Suppress("DEPRECATION")
 class SyncService : IntentService("toque-synchro") {
     override fun onHandleIntent(intent: Intent?) {
         val app = ToqueApp.of(this)
-        if (!app.prefs.autoSync) return
-        if (System.currentTimeMillis() - app.prefs.lastSyncMs < 6 * 3600_000L) return
-        OnlineSync(this, app.prefs, app.recipes, app.log).sync()
+        // L'alarme part aussi quand l'horloge du robot est remise à l'heure au démarrage, parfois
+        // avant le Wi-Fi : on attend le réseau, et on laisse passer ce tour s'il ne vient pas.
+        if (!TimeSync.awaitTrusted(NETWORK_WAIT_MS)) return
+        val now = System.currentTimeMillis()
+        if (app.prefs.autoSync && now - app.prefs.lastSyncMs >= 6 * 3600_000L)
+            OnlineSync(this, app.prefs, app.recipes, app.log).sync()
+        if (app.prefs.cookomixAutoSync && now - app.prefs.cookomixLastSyncMs >= 6 * 3600_000L)
+            CookomixSync(this, app.prefs, app.recipes, app.log).sync()
     }
 
     companion object {
+        private const val NETWORK_WAIT_MS = 3 * 60_000L
+
         fun schedule(c: Context) {
             val am = c.getSystemService(Context.ALARM_SERVICE) as AlarmManager
             val pi = PendingIntent.getBroadcast(c, 0, Intent(c, SyncAlarm::class.java), PendingIntent.FLAG_UPDATE_CURRENT)

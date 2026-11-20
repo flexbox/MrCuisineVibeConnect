@@ -245,6 +245,8 @@ and without macFUSE the FUSE package stops mtkclient from starting
 
 - Updates: Toque › Settings › Updates installs new releases from the original repository.
 - Recipes: Settings › Lidl recipes › Sync (monsieur-cuisine.com, no account). Nightly re-sync.
+- Cookomix recipes: Settings › Cookomix recipes › Sync Cookomix (cookomix.com, an hour or more the
+  first time). Error codes CKX-01 to CKX-07: [docs/COOKOMIX-ERREURS.md](docs/COOKOMIX-ERREURS.md).
 - Clock: set automatically (time zone from the Internet connection); Settings › Date and time.
 - To work on the robot later over Wi-Fi: `adb connect <robot IP>:5555`.
 
@@ -258,4 +260,6 @@ and `./gradlew :app:assembleRelease`, with JDK 17 or 21 (Android Studio's:
 `export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"`). Interface texts are
 written in French and wrapped in `tr(...)`. Motor safety rules live in `core/.../machine/Safety.kt`
 and are enforced by `MachineController`: keep them strict, and add a test in `ControllerTest` for any
-behaviour change.
+behaviour change. The Cookomix conversion (Thermomix → MCC) lives in `core/.../recipes/Cookomix.kt`
+(tests: `CookomixTest`, and `CookomixTwinTest` with `tools/twin.py` running); every `Cookomix.Error`
+code must have a row in `docs/COOKOMIX-ERREURS.md` (checked by `CookomixTest.errorCodes`).

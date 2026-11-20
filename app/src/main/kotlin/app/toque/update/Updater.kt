@@ -64,7 +64,8 @@ class Updater(private val context: Context) {
         val dir = File(context.cacheDir, "maj")
         dir.mkdirs()
         dir.listFiles()?.forEach { it.delete() }
-        val file = File(dir, "Toque-${r.version}.apk")
+        // Le nom du fichier passe ensuite dans une commande root : seuls les caractères d'un numéro de version y entrent.
+        val file = File(dir, "Toque-${r.version.filter { it.isLetterOrDigit() || it in ".-_" }}.apk")
         val c = open(url, "application/octet-stream")
         try {
             if (c.responseCode != 200) throw Failure(tr("Téléchargement refusé (code %d)", c.responseCode))
@@ -164,7 +165,7 @@ class Updater(private val context: Context) {
     }
 
     private fun open(url: String, accept: String): HttpURLConnection {
-        val c = URL(url).openConnection() as HttpURLConnection
+        val c = app.toque.Tls.apply(URL(url).openConnection() as HttpURLConnection)
         c.connectTimeout = 15_000
         c.readTimeout = 30_000
         c.instanceFollowRedirects = true
@@ -176,7 +177,9 @@ class Updater(private val context: Context) {
     private fun network(e: IOException): Failure {
         log.write("maj", "réseau : $e")
         return when (e) {
-            is SSLException -> Failure(tr("Connexion sécurisée à GitHub impossible. Vérifiez la date et l'heure du robot."))
+            is SSLException ->
+                if (app.toque.TimeSync.trusted) Failure(tr("Connexion sécurisée à GitHub impossible (certificat refusé)."))
+                else Failure(tr("L'heure du robot n'est pas encore réglée : connexion sécurisée à GitHub impossible. Vérifiez le Wi-Fi, puis Réglages › Date et heure › Mettre à l'heure."))
             else -> Failure(tr("Pas de connexion à GitHub. Vérifiez le Wi-Fi du robot."))
         }
     }

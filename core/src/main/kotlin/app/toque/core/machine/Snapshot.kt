@@ -60,6 +60,15 @@ data class Snapshot(
     val busy: Boolean get() = running || state == JobState.PAUSED || turboActive
     val hot: Boolean get() = hasSample && actualTempC >= Limits.HOT_C
 
+    /**
+     * La base donne-t-elle une température ? À froid elle annonce 0 °C, bol en place ou non
+     * (constaté sur un SKMC 1200) : ce n'est pas une mesure, et l'afficher tromperait.
+     */
+    val temperatureKnown: Boolean get() = hasSample && actualTempC > 0
+
+    /** Bol retiré, et pas seulement couvercle ouvert : la base signale « couvercle ouvert » dans les deux cas. */
+    val bowlRemoved: Boolean get() = hasSample && lidOpen && !bowlDetected
+
     fun toMap(): Map<String, Any> = linkedMapOf(
         "link" to link.name, "transportName" to transportName, "transportUp" to transportUp,
         "faultCode" to faultCode, "faultMessage" to faultMessage, "hasSample" to hasSample,

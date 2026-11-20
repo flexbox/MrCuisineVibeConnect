@@ -144,7 +144,7 @@ class SimBoard(private val clock: Clock) {
         if (clockwise) status = status or 0x08
         if (errorCode != 0) status = status or 0x10
         if (heat && temp >= Mcc.celsiusForLevel(tempLevel)) status = status or 0x20
-        if (bowlPresent) status = status or 0x40
+        if (!bowlPresent) status = status or 0x40
         if (lidOpen) status = status or 0x80
         val ext = when (op) { Operation.STEAM -> 3; Operation.TOAST -> 4; Operation.KNEAD -> 5; else -> 0 }
         r[0] = 0x55; r[1] = 27; r[2] = 0xB1.toByte()

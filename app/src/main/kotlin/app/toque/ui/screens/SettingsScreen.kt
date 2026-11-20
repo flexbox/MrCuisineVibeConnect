@@ -18,12 +18,15 @@ import app.toque.core.i18n.I18n
 import app.toque.core.i18n.tr
 import app.toque.core.machine.RootShell
 import app.toque.core.machine.Snapshot
+import app.toque.core.photos.SharedAlbum
 import app.toque.core.time.ZoneLookup
 import app.toque.core.update.Release
+import app.toque.recipes.CookomixSync
 import app.toque.recipes.LidlSync
 import app.toque.recipes.OnlineSync
 import app.toque.ui.Icon
 import app.toque.ui.MainActivity
+import app.toque.ui.PhotoFrame
 import app.toque.ui.Screen
 import app.toque.ui.Ui
 import app.toque.update.Updater
@@ -35,9 +38,15 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
     private lateinit var host: EditText
     private lateinit var port: EditText
     private lateinit var syncText: TextView
+    private lateinit var ckxText: TextView
+    private var ckxBusy = false
+    /** Une seule boucle de suivi par synchro, quel que soit le nombre d'appels (onShow, boutons…). */
+    private val ckxPoll = Runnable { if (ckxText.isAttachedToWindow) refreshCookomix() }
+    private val lidlPoll = Runnable { if (syncText.isAttachedToWindow) refreshSync() }
     private lateinit var bowlText: TextView
-    private lateinit var linkText: TextView
     private lateinit var timeText: TextView
+    private lateinit var albumField: EditText
+    private lateinit var albumText: TextView
     private var settingTime = false
     private var mode = a.prefs.mode
     private var syncing = false
@@ -59,6 +68,9 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         val right = Ui.vertical(c)
         columns.addView(left, LinearLayout.LayoutParams(0, Ui.WRAP, 1f).apply { rightMargin = Ui.u(18) })
         columns.addView(right, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
+        // Cette page ne garde que les commandes et les états : les explications sont dans l'aide.
+        col.addView(Ui.button(c, tr("Aide sur les fonctionnalités"), Ui.Style.SECONDARY, Icon.Kind.INFO, height = 52, textSize = 18f) { a.push(HelpScreen(a)) },
+            Ui.lp(Ui.WRAP, Ui.WRAP, b = 14))
         col.addView(columns)
 
         // ---- Machine
@@ -71,8 +83,6 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         twinBox.addView(host, LinearLayout.LayoutParams(0, Ui.u(58), 1f).apply { rightMargin = Ui.u(10) })
         twinBox.addView(port, LinearLayout.LayoutParams(Ui.u(120), Ui.u(58)))
         machine.addView(twinBox, Ui.lp(t = 12))
-        linkText = Ui.text(c, "", 16f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f) }
-        machine.addView(linkText, Ui.lp(t = 12))
         machine.addView(Ui.button(c, tr("Appliquer"), Ui.Style.PRIMARY, Icon.Kind.CHECK, height = 58) { applyMode() }, Ui.lp(Ui.WRAP, Ui.WRAP, t = 14))
         renderModes()
 
@@ -84,16 +94,42 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         })
         bowlText = Ui.text(c, "", 15f, Ui.TEXT3).apply { setLineSpacing(0f, 1.1f) }
         safety.addView(bowlText, Ui.lp(t = 6))
-        safety.addView(toggle(tr("Montée progressive de la vitesse si le contenu est chaud"), a.prefs.hotRamp) { on ->
+        safety.addView(toggle(tr("Montée en vitesse progressive à chaud"), a.prefs.hotRamp) { on ->
             a.prefs.hotRamp = on
             a.machine.reconfigure { a.refusal(it) }
         }, Ui.lp(t = 10))
-        safety.addView(Ui.text(c, tr("À partir de 60 °C, la lame atteint sa vitesse en 2 à 3 secondes pour éviter les projections. À froid, elle y va directement."),
-            15f, Ui.TEXT3).apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 6))
+        safety.addView(toggle(tr("Faire confirmer les réglages des recettes"), a.prefs.confirmImported) { a.prefs.confirmImported = it }, Ui.lp(t = 10))
         safety.addView(toggle(tr("Enchaîner les étapes machine des recettes"), a.prefs.chainSteps) { a.prefs.chainSteps = it }, Ui.lp(t = 10))
-        safety.addView(Ui.text(c, tr("Les réglages qui se suivent sans geste à faire entre eux partent ensemble d'un seul appui sur Lancer : la lame passe directement à la vitesse et à la température suivantes."),
-            15f, Ui.TEXT3).apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 6))
         safety.addView(toggle(tr("Sons"), a.prefs.sound) { a.prefs.sound = it }, Ui.lp(t = 10))
+
+        // ---- Écran de veille
+        val standby = section(left, tr("Écran de veille"), Icon.Kind.CLOCK)
+        val sleepOptions = listOf("5" to tr("Après 5 min sans contact"), "10" to tr("Après 10 min sans contact"),
+            "30" to tr("Après 30 min sans contact"), "0" to tr("Jamais"))
+        standby.addView(dropdown(sleepOptions, a.prefs.screenSleepMinutes.toString()) { a.prefs.screenSleepMinutes = it.toInt() },
+            Ui.lp(Ui.MATCH, Ui.u(58), t = 4))
+        standby.addView(Ui.text(c, tr("Pendant la veille"), 18f, Ui.TEXT), Ui.lp(t = 14))
+        val photoBox = Ui.vertical(c)
+        photoBox.visibility = if (a.prefs.standbyPhotos) View.VISIBLE else View.GONE
+        standby.addView(dropdown(listOf("clock" to tr("Heure et date sur fond noir"), "photos" to tr("Cadre photo (album Google Photos)")),
+            if (a.prefs.standbyPhotos) "photos" else "clock") { choice ->
+            a.prefs.standbyPhotos = choice == "photos"
+            photoBox.visibility = if (choice == "photos") View.VISIBLE else View.GONE
+        }, Ui.lp(Ui.MATCH, Ui.u(58), t = 6))
+        standby.addView(photoBox)
+        albumField = field(a.prefs.photoAlbum, tr("Lien de partage de l'album"))
+        photoBox.addView(albumField, Ui.lp(Ui.MATCH, Ui.u(58), t = 12))
+        photoBox.addView(note(tr("Toute personne ayant ce lien peut voir l'album.")), Ui.lp(t = 6))
+        albumText = Ui.text(c, "", 16f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f); visibility = View.GONE }
+        photoBox.addView(albumText, Ui.lp(t = 10))
+        photoBox.addView(Ui.button(c, tr("Vérifier l'album"), Ui.Style.SECONDARY, Icon.Kind.CHECK, height = 52, textSize = 18f) { checkAlbum() },
+            Ui.lp(Ui.WRAP, Ui.WRAP, t = 10))
+        val seconds = (10..60 step 10).map { it.toString() to tr("Une photo toutes les %d secondes", it) }
+        photoBox.addView(dropdown(seconds, a.prefs.photoSeconds.toString()) { a.prefs.photoSeconds = it.toInt() }, Ui.lp(Ui.MATCH, Ui.u(58), t = 14))
+        val brightness = listOf(5, 10, 20, 40, 60, 80, 100).map { it.toString() to tr("Luminosité des photos : %d %%", it) }
+        photoBox.addView(dropdown(brightness, a.prefs.photoBrightness.toString()) { a.prefs.photoBrightness = it.toInt() }, Ui.lp(Ui.MATCH, Ui.u(58), t = 8))
+        photoBox.addView(Ui.button(c, tr("Lancer le diaporama"), Ui.Style.PRIMARY, Icon.Kind.PLAY, height = 58) { startPhotos() },
+            Ui.lp(Ui.WRAP, Ui.WRAP, t = 12))
 
         // ---- Langue (titre bilingue : trouvable quelle que soit la langue affichée)
         val language = section(right, "Langue · Language", Icon.Kind.INFO)
@@ -120,20 +156,27 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
 
         // ---- Recettes Lidl
         val lidl = section(right, tr("Recettes Lidl"), Icon.Kind.SYNC)
-        lidl.addView(Ui.text(c, tr("Toque télécharge lui-même les recettes officielles du Monsieur Cuisine connect sur monsieur-cuisine.com (sans compte)."),
-            16f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f) })
         syncText = Ui.text(c, "", 16f, Ui.TEXT)
-        lidl.addView(syncText, Ui.lp(t = 10))
+        lidl.addView(syncText)
         val b1 = Ui.horizontal(c)
         b1.addView(Ui.button(c, tr("Synchroniser"), Ui.Style.PRIMARY, Icon.Kind.SYNC, height = 58) { sync(online = true) }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
         lidl.addView(b1, Ui.lp(t = 12))
-        lidl.addView(Ui.text(c, tr("Autre source : les recettes déjà présentes dans l'appli d'origine du robot (remplacent celles du site)."),
-            14f, Ui.TEXT3).apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 12))
-        val b2 = Ui.horizontal(c)
-        b2.addView(Ui.button(c, tr("Importer de l'appli d'origine"), Ui.Style.SECONDARY, height = 52) { sync(online = false) }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
-        b2.addView(Ui.button(c, tr("Ouvrir l'appli d'origine"), Ui.Style.GHOST, Icon.Kind.LINK, height = 52) { a.openVendorApp() })
-        lidl.addView(b2, Ui.lp(t = 6))
+        // L'un sous l'autre : côte à côte, la colonne est trop étroite et le second bouton se replie sur 4 lignes.
+        lidl.addView(Ui.button(c, tr("Importer de l'appli d'origine"), Ui.Style.SECONDARY, height = 52, textSize = 18f) { sync(online = false) },
+            Ui.lp(Ui.WRAP, Ui.WRAP, t = 6))
+        lidl.addView(Ui.button(c, tr("Ouvrir l'appli d'origine"), Ui.Style.GHOST, Icon.Kind.LINK, height = 52, textSize = 18f) { a.openVendorApp() },
+            Ui.lp(Ui.WRAP, Ui.WRAP, t = 8))
         lidl.addView(toggle(tr("Synchro automatique chaque nuit"), a.prefs.autoSync) { a.prefs.autoSync = it }, Ui.lp(t = 10))
+
+        // ---- Recettes Cookomix
+        val ckx = section(right, tr("Recettes Cookomix"), Icon.Kind.SYNC)
+        ckxText = Ui.text(c, "", 16f, Ui.TEXT)
+        ckx.addView(ckxText)
+        ckx.addView(Ui.button(c, tr("Synchroniser Cookomix"), Ui.Style.PRIMARY, Icon.Kind.SYNC, height = 58) { syncCookomix() },
+            Ui.lp(Ui.WRAP, Ui.WRAP, t = 12))
+        ckx.addView(toggle(tr("Inclure les recettes adaptées"), a.prefs.cookomixAdapted) { a.prefs.cookomixAdapted = it }, Ui.lp(t = 10))
+        ckx.addView(toggle(tr("Synchro Cookomix chaque nuit"), a.prefs.cookomixAutoSync) { a.prefs.cookomixAutoSync = it }, Ui.lp(t = 10))
+        refreshCookomix()
 
         // ---- Mises à jour
         val updates = section(left, tr("Mises à jour"), Icon.Kind.INFO)
@@ -152,8 +195,7 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         tools.addView(link(tr("Paramètres Android")) { a.openAndroidSettings() })
         tools.addView(link(tr("Revenir à l'appli d'origine")) { restoreVendor() })
         val version = try { a.packageManager.getPackageInfo(a.packageName, 0).versionName } catch (_: Exception) { "?" }
-        tools.addView(Ui.text(c, tr("Toque %s · protocole d'après le Monsieur Cuisine Developer SDK (licence MIT). " +
-            "Projet indépendant, non affilié à Lidl ni à SilverCrest.", version), 14f, Ui.TEXT3).apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 12))
+        tools.addView(Ui.text(c, "Toque $version", 14f, Ui.TEXT3), Ui.lp(t = 12))
 
         return Ui.scroll(c, col)
     }
@@ -166,6 +208,53 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         card.addView(head, Ui.lp(b = 10))
         parent.addView(card, Ui.lp(b = 16))
         return card
+    }
+
+    /** Texte d'explication sous un réglage. */
+    private fun note(text: String): TextView = Ui.text(c, text, 15f, Ui.TEXT3).apply { setLineSpacing(0f, 1.1f) }
+
+    private fun albumStatus(message: String, color: Int) {
+        albumText.text = message
+        albumText.setTextColor(color)
+        albumText.visibility = if (message.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    /** Enregistre le lien saisi ; faux (avec un message) s'il n'a pas la forme d'un lien de partage. */
+    private fun saveAlbum(): Boolean {
+        val typed = albumField.text.toString().trim()
+        val code = SharedAlbum.code(typed)
+        if (typed.isNotEmpty() && code == null) {
+            albumStatus(tr("Lien non reconnu : il se termine par un code, comme photos.app.goo.gl/AbCd1234."), Ui.WARN)
+            return false
+        }
+        a.prefs.photoAlbum = code.orEmpty()
+        if (code != null && code != typed) albumField.setText(code)
+        albumStatus("", Ui.TEXT2)
+        return true
+    }
+
+    private fun checkAlbum() {
+        if (!saveAlbum()) return
+        val code = a.prefs.photoAlbum
+        if (code.isEmpty()) return
+        albumStatus(tr("Lecture de l'album…"), Ui.TEXT2)
+        Thread {
+            val (ok, message) = try {
+                val album = PhotoFrame.album(code, fresh = true)
+                true to if (album.title.isEmpty()) tr("Album lu : %d photos", album.photos.size) else tr("Album « %s » : %d photos", album.title, album.photos.size)
+            } catch (e: SharedAlbum.UnreadableException) {
+                false to tr("Aucune photo trouvée à cette adresse : vérifiez que l'album est bien partagé par lien.")
+            } catch (e: Exception) {
+                false to tr("Album injoignable : vérifiez le Wi-Fi et le lien (%s).", e.message ?: e.javaClass.simpleName)
+            }
+            a.runOnUiThread { albumStatus(message, if (ok) Ui.OK else Ui.WARN) }
+        }.start()
+    }
+
+    private fun startPhotos() {
+        if (!saveAlbum()) return
+        if (a.prefs.photoAlbum.isEmpty()) a.toast(tr("Saisissez d'abord le lien de partage de l'album."), Ui.WARN)
+        else a.startPhotoFrame()
     }
 
     private fun field(value: String, hint: String) = EditText(c).apply {
@@ -211,8 +300,9 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         val box = Ui.horizontal(c)
         box.setPadding(Ui.u(16), 0, Ui.u(14), 0)
         box.background = Ui.pressable(Ui.round(Ui.SURFACE2, 16f, Ui.STROKE, 1f), 16f)
-        val label = options.firstOrNull { it.first == selected }?.second ?: options.first().second
-        box.addView(Ui.text(c, label, 19f, Ui.TEXT), LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
+        var current = selected
+        val label = Ui.text(c, options.firstOrNull { it.first == current }?.second ?: options.first().second, 19f, Ui.TEXT)
+        box.addView(label, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
         box.addView(Icon(c, Icon.Kind.CHEVRON, Ui.TEXT2).apply { rotation = 90f }, LinearLayout.LayoutParams(Ui.u(22), Ui.u(22)))
         box.isClickable = true
         box.setOnClickListener {
@@ -225,13 +315,17 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
             val height = if (options.size > 7) Ui.u(400) else ViewGroup.LayoutParams.WRAP_CONTENT
             val popup = PopupWindow(scroll, box.width, height, false)
             for ((code, name) in options) {
-                val row = Ui.text(c, name, 19f, if (code == selected) Ui.ACCENT else Ui.TEXT)
+                val row = Ui.text(c, name, 19f, if (code == current) Ui.ACCENT else Ui.TEXT)
                 row.setPadding(Ui.u(16), Ui.u(14), Ui.u(16), Ui.u(14))
                 row.background = Ui.pressable(Ui.round(0, 0f), 0f)
                 row.isClickable = true
                 row.setOnClickListener {
                     popup.dismiss()
-                    if (code != selected) onPick(code)
+                    if (code != current) {
+                        current = code
+                        label.text = name
+                        onPick(code)
+                    }
                 }
                 list.addView(row, Ui.lp(Ui.MATCH, Ui.WRAP))
             }
@@ -253,11 +347,6 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
             }, mode == m) { mode = m; renderModes() }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
         }
         twinBox.visibility = if (mode == Prefs.Mode.TWIN) View.VISIBLE else View.GONE
-        linkText.text = when (mode) {
-            Prefs.Mode.DEMO -> tr("Base moteur simulée : pour essayer l'appli sur n'importe quel appareil Android.")
-            Prefs.Mode.TWIN -> tr("Jumeau numérique du SDK lancé sur un PC (tools/twin.py). Avec « adb reverse tcp:8765 tcp:8765 », gardez 127.0.0.1.")
-            Prefs.Mode.HARDWARE -> tr("Pilote le vrai moteur par le port série. Exige le root. L'appli d'origine est coupée du moteur (réversible).")
-        }
     }
 
     private fun applyMode() {
@@ -298,7 +387,7 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
                     problems += tr("impossible de couper l'appli d'origine du moteur")
                 sync.forceStop()
             }
-            view.post {
+            a.runOnUiThread {
                 if (problems.isNotEmpty()) {
                     a.confirm(tr("Machine réelle indisponible"), problems.joinToString("\n") { "• $it" }, "OK", tr("Fermer")) {}
                 } else save()
@@ -320,7 +409,7 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
                     val sync = LidlSync(a, a.prefs, a.app.recipes, a.app.log)
                     sync.setVendorHardware(true)
                     val launch = sync.components().launch
-                    view.post {
+                    a.runOnUiThread {
                         if (launch != null) a.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                         else a.toast(tr("Appli d'origine introuvable"), Ui.WARN)
                     }
@@ -330,6 +419,11 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
     }
 
     private fun sync(online: Boolean) {
+        if (online && OnlineSync.isRunning) {
+            a.toast(tr("Synchronisation déjà en cours"), Ui.WARN)
+            refreshSync()
+            return
+        }
         if (syncing) return
         if (!online && a.prefs.mode != Prefs.Mode.HARDWARE) {
             a.toast(tr("Disponible une fois Toque installé sur le robot (mode Machine réelle)"), Ui.WARN)
@@ -338,9 +432,9 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         syncing = true
         syncText.text = tr("Synchronisation en cours… (quelques minutes)")
         Thread {
-            val r = if (online) OnlineSync(a, a.prefs, a.app.recipes, a.app.log).sync { msg -> view.post { syncText.text = msg } }
-            else LidlSync(a, a.prefs, a.app.recipes, a.app.log).importNow { msg -> view.post { syncText.text = msg } }
-            view.post {
+            val r = if (online) OnlineSync(a, a.prefs, a.app.recipes, a.app.log).sync { msg -> a.runOnUiThread { syncText.text = msg } }
+            else LidlSync(a, a.prefs, a.app.recipes, a.app.log).importNow { msg -> a.runOnUiThread { syncText.text = msg } }
+            a.runOnUiThread {
                 syncing = false
                 refreshSync()
                 a.toast(r.message, if (r.ok) Ui.OK else Ui.WARN)
@@ -351,8 +445,9 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
     private fun refreshTime(message: String? = null) {
         val zone = TimeSync.current()
         val mode = if (a.prefs.timeZone == ZoneLookup.AUTO) tr("automatique") else tr("choisi à la main")
-        timeText.text = tr("Il est %s · fuseau %s (%s)", TimeSync.clock(), zone.replace('_', ' '), mode) +
-            (message?.let { "\n" + it } ?: "")
+        val shown = zone.replace('_', ' ')
+        timeText.text = (if (TimeSync.trusted) tr("Il est %s · fuseau %s (%s)", TimeSync.clock(), shown, mode)
+            else tr("Heure non confirmée · fuseau %s (%s)", shown, mode)) + (message?.let { "\n" + it } ?: "")
     }
 
     private fun setClock() {
@@ -373,7 +468,54 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         }.start()
     }
 
+    private fun refreshCookomix() {
+        ckxText.removeCallbacks(ckxPoll)
+        val resuming = a.prefs.cookomixSyncPending && app.toque.ToqueApp.resumesScheduled.get() > 0
+        if (CookomixSync.isRunning || resuming) {
+            // Synchro lancée avant d'ouvrir cet écran, de nuit, ou interrompue et sur le point de
+            // reprendre toute seule : on suit sa progression.
+            ckxText.text = CookomixSync.current.ifEmpty {
+                if (CookomixSync.isRunning) tr("Synchronisation Cookomix en cours…") else tr("Reprise automatique dès que le réseau répond…")
+            }
+            ckxText.postDelayed(ckxPoll, 1_000)
+            return
+        }
+        val last = a.prefs.cookomixLastResult
+        ckxText.text = if (last.isEmpty()) tr("Jamais synchronisé") else tr("Dernière synchro le %s", last)
+    }
+
+    private fun syncCookomix() {
+        if (CookomixSync.isRunning) {
+            a.toast(tr("Synchronisation Cookomix déjà en cours"), Ui.WARN)
+            refreshCookomix()
+            return
+        }
+        if (ckxBusy) return
+        ckxBusy = true
+        ckxText.text = tr("Synchronisation Cookomix en cours…")
+        Thread {
+            val r = CookomixSync(a, a.prefs, a.app.recipes, a.app.log).sync { msg -> a.runOnUiThread { ckxText.text = msg } }
+            a.runOnUiThread {
+                ckxBusy = false
+                refreshCookomix()
+                refreshSync()
+                a.toast(r.message, if (r.ok) Ui.OK else Ui.WARN)
+            }
+        }.start()
+    }
+
     private fun refreshSync() {
+        syncText.removeCallbacks(lidlPoll)
+        val resuming = a.prefs.lidlSyncPending && app.toque.ToqueApp.resumesScheduled.get() > 0
+        if (OnlineSync.isRunning || resuming) {
+            // Synchro lancée avant d'ouvrir cet écran, de nuit, ou interrompue et sur le point de
+            // reprendre toute seule : on suit sa progression.
+            syncText.text = OnlineSync.current.ifEmpty {
+                if (OnlineSync.isRunning) tr("Synchronisation en cours… (quelques minutes)") else tr("Reprise automatique dès que le réseau répond…")
+            }
+            syncText.postDelayed(lidlPoll, 1_000)
+            return
+        }
         val last = a.prefs.lastSyncResult
         syncText.text = (if (last.isEmpty()) tr("Jamais synchronisé") else tr("Dernière synchro le %s", last)) +
             "\n" + tr("%d recettes dans Toque", a.app.recipes.count)
@@ -420,18 +562,23 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         renderUpdate()
         Thread {
             try {
+                // Sans heure juste, GitHub refuse la connexion sécurisée : on tente d'abord le réglage.
+                if (!TimeSync.trusted) try {
+                    TimeSync(a, a.prefs, a.app.log).run()
+                } catch (_: Exception) {
+                }
                 val r = updater.latest()
-                view.post {
+                a.runOnUiThread {
                     release = r
                     upd = if (updater.isNewer(r)) Upd.AVAILABLE else Upd.UP_TO_DATE
                     renderUpdate()
                     if (upd == Upd.AVAILABLE) installUpdate()
                 }
             } catch (e: Updater.Failure) {
-                view.post { upd = Upd.ERROR; updMessage = e.message ?: tr("Erreur"); renderUpdate() }
+                a.runOnUiThread { upd = Upd.ERROR; updMessage = e.message ?: tr("Erreur"); renderUpdate() }
             } catch (e: Exception) {
                 a.app.log.crash("maj", e)
-                view.post { upd = Upd.ERROR; updMessage = tr("Erreur inattendue : %s", e.message); renderUpdate() }
+                a.runOnUiThread { upd = Upd.ERROR; updMessage = tr("Erreur inattendue : %s", e.message); renderUpdate() }
             }
         }.start()
     }
@@ -457,14 +604,14 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
                 renderUpdate()
                 Thread {
                     try {
-                        val file = updater.download(r) { p -> view.post { updPercent = p; renderUpdate() } }
-                        view.post { upd = Upd.INSTALLING; renderUpdate() }
+                        val file = updater.download(r) { p -> a.runOnUiThread { updPercent = p; renderUpdate() } }
+                        a.runOnUiThread { upd = Upd.INSTALLING; renderUpdate() }
                         updater.install(file)
                     } catch (e: Updater.Failure) {
-                        view.post { updateFailed(e.message ?: tr("Erreur")) }
+                        a.runOnUiThread { updateFailed(e.message ?: tr("Erreur")) }
                     } catch (e: Exception) {
                         a.app.log.crash("maj", e)
-                        view.post { updateFailed(tr("Erreur inattendue : %s", e.message)) }
+                        a.runOnUiThread { updateFailed(tr("Erreur inattendue : %s", e.message)) }
                     }
                 }.start()
             }
@@ -483,10 +630,10 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         mode = a.prefs.mode
         renderModes()
         if (!syncing) refreshSync()
+        if (::ckxText.isInitialized && !ckxBusy) refreshCookomix()
     }
 
     override fun onSnapshot(s: Snapshot) {
-        bowlText.text = if (s.hasSample) tr("Capteur du bol en ce moment : %s. Vérifiez qu'il change quand vous retirez le bol avant d'activer cette option.",
-            if (s.bowlDetected) tr("bol détecté") else tr("bol NON détecté")) else tr("Base non connectée")
+        bowlText.text = if (!s.hasSample) tr("Base non connectée") else if (s.bowlDetected) tr("Capteur : bol détecté") else tr("Capteur : bol non détecté")
     }
 }

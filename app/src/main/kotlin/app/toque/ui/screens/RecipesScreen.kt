@@ -19,9 +19,9 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import app.toque.Prefs
 import app.toque.core.i18n.I18n
 import app.toque.core.i18n.tr
+import app.toque.core.recipes.Origin
 import app.toque.core.recipes.RecipeFilter
 import app.toque.core.recipes.SearchIndex
 import app.toque.ui.Icon
@@ -38,16 +38,21 @@ import java.util.concurrent.Executors
 class RecipesScreen(a: MainActivity, private val focusSearch: Boolean = false, favorites: Boolean = false) : Screen(a) {
     override val title = if (favorites) tr("Favoris") else tr("Recettes")
 
-    private var filter = RecipeFilter(favoritesOnly = favorites)
+    // Favoris et recherche lancée depuis l'accueil : toutes les sources (l'onglet mémorisé masquerait
+    // sans prévenir les résultats de l'autre) ; le catalogue reprend l'onglet mémorisé.
+    private var filter = RecipeFilter(favoritesOnly = favorites,
+        origin = if (favorites || focusSearch) Origin.ALL else Origin.of(a.prefs.recipeOrigin))
+    private lateinit var tabRow: LinearLayout
     private var query = ""
     private var results: List<SearchIndex.Hit> = emptyList()
-    private var generation = 0
+    @Volatile private var generation = 0
     private lateinit var input: EditText
     private lateinit var chips: LinearLayout
     private lateinit var grid: GridView
     private lateinit var count: TextView
     private lateinit var empty: LinearLayout
     private lateinit var emptyText: TextView
+    private lateinit var emptyIcon: Icon
     private val adapter = Adapter()
     private var unsub: (() -> Unit)? = null
     private val runSearch = Runnable { search() }
@@ -57,6 +62,9 @@ class RecipesScreen(a: MainActivity, private val focusSearch: Boolean = false, f
         root.setPadding(Ui.u(24), Ui.u(6), Ui.u(24), 0)
 
         val bar = Ui.horizontal(c)
+        // Onglets de provenance : recettes Lidl et Cookomix ne sont pas mélangées (catégories différentes).
+        tabRow = Ui.horizontal(c)
+        bar.addView(tabRow, Ui.lp(Ui.WRAP, Ui.WRAP, r = 14))
         val field = Ui.horizontal(c)
         field.setPadding(Ui.u(20), 0, Ui.u(10), 0)
         field.background = Ui.round(Ui.SURFACE, 32f, Ui.STROKE, 1f)
@@ -122,7 +130,8 @@ class RecipesScreen(a: MainActivity, private val focusSearch: Boolean = false, f
         }
         body.addView(grid, Ui.flp())
         empty = Ui.vertical(c, Gravity.CENTER)
-        empty.addView(Icon(c, Icon.Kind.BOOK, Ui.TEXT3), LinearLayout.LayoutParams(Ui.u(64), Ui.u(64)))
+        emptyIcon = Icon(c, Icon.Kind.BOOK, Ui.TEXT3)
+        empty.addView(emptyIcon, LinearLayout.LayoutParams(Ui.u(64), Ui.u(64)))
         emptyText = Ui.text(c, "", 21f, Ui.TEXT2).apply { gravity = Gravity.CENTER; setLineSpacing(0f, 1.2f) }
         empty.addView(emptyText, Ui.lp(Ui.u(640), Ui.WRAP, t = 16))
         body.addView(empty, Ui.flp())
@@ -130,16 +139,37 @@ class RecipesScreen(a: MainActivity, private val focusSearch: Boolean = false, f
         return root
     }
 
+    private fun buildTabs() {
+        tabRow.removeAllViews()
+        val origins = listOf(Origin.ALL, Origin.LIDL, Origin.COOKOMIX)
+        tabRow.addView(Ui.tabs(c, listOf(tr("Tout"), "Lidl", "Cookomix"), origins.indexOf(filter.origin)) { i ->
+            a.prefs.recipeOrigin = origins[i].name
+            // Changer d'onglet garde favoris et durée, mais pas une catégorie de l'autre source.
+            filter = filter.copy(origin = origins[i], category = "")
+            buildTabs(); buildChips(); search()
+        })
+    }
+
     private fun buildChips() {
         chips.removeAllViews()
         fun chip(label: String, selected: Boolean, f: RecipeFilter) {
             chips.addView(Ui.toggleChip(c, label, selected) { filter = f; buildChips(); search() }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
         }
-        val base = RecipeFilter()
+        val base = RecipeFilter(origin = filter.origin)
         chip(tr("Toutes"), filter == base, base)
+        // Page de toutes les catégories (le bandeau ne montre que les plus fournies).
+        chips.addView(Ui.toggleChip(c, "☰ " + tr("Catégories…"), false) {
+            a.push(CategoriesScreen(a, filter.category, filter.origin) { cat, origin ->
+                a.prefs.recipeOrigin = origin.name
+                filter = RecipeFilter(origin = origin, category = cat)
+            })
+        }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
         chip(tr("Favoris"), filter.favoritesOnly, base.copy(favoritesOnly = true))
         chip(tr("30 min max"), filter.maxMinutes == 30, base.copy(maxMinutes = 30))
-        for (cat in a.app.recipes.index.categories.take(30)) chip(cat, filter.category == cat, base.copy(category = cat))
+        val top = a.app.recipes.index.findCategories("", filter.origin).take(20).map { it.name }
+        // Catégorie choisie dans la page des catégories : affichée en tête si elle n'est pas dans le bandeau.
+        val cats = if (filter.category.isNotEmpty() && filter.category !in top) listOf(filter.category) + top else top
+        for (cat in cats) chip(cat, filter.category == cat, base.copy(category = cat))
     }
 
     private fun search() {
@@ -148,6 +178,8 @@ class RecipesScreen(a: MainActivity, private val focusSearch: Boolean = false, f
         val f = filter
         val index = a.app.recipes.index
         searchExec.execute {
+            // Frappe suivante déjà arrivée : cette recherche ne sera pas affichée.
+            if (gen != generation) return@execute
             val hits = if (q.contains(',')) index.withIngredients(q.split(','), f) else index.search(q, f)
             view.post {
                 if (gen != generation) return@post
@@ -163,16 +195,16 @@ class RecipesScreen(a: MainActivity, private val focusSearch: Boolean = false, f
         val none = repo.loaded && repo.count == 0
         count.text = if (results.isEmpty()) "" else if (results.size == 1) tr("1 recette") else tr("%d recettes", results.size)
         empty.visibility = if (results.isEmpty() && repo.loaded) View.VISIBLE else View.GONE
+        emptyIcon.set(if (filter.favoritesOnly && query.isBlank() && !none) Icon.Kind.STAR else Icon.Kind.BOOK)
         emptyText.text = when {
-            none && a.prefs.mode == Prefs.Mode.HARDWARE ->
-                tr("Les recettes Lidl apparaîtront après la première synchronisation.\nRéglages › Recettes Lidl › Synchroniser.")
-            none -> tr("Les recettes Lidl apparaîtront après la première synchronisation, une fois Toque installé sur le robot.")
+            none -> tr("Les recettes apparaîtront après une première synchronisation.\nRéglages › Recettes Lidl ou Recettes Cookomix › Synchroniser.")
             filter.favoritesOnly && query.isBlank() -> tr("Aucun favori pour l'instant.\nTouchez l'étoile d'une recette pour l'ajouter.")
             else -> tr("Aucune recette ne correspond.\nAstuce : séparez plusieurs ingrédients par des virgules.")
         }
     }
 
     override fun onShow() {
+        buildTabs()
         buildChips()
         search()
         unsub = a.app.recipes.onChange { buildChips(); search() }

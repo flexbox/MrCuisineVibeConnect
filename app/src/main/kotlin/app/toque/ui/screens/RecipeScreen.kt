@@ -87,6 +87,11 @@ class RecipeScreen(a: MainActivity, private val recipe: Recipe) : Screen(a) {
         val steps = Ui.vertical(c)
         steps.addView(section(tr("Étapes")))
         for ((i, s) in recipe.steps.withIndex()) steps.addView(stepRow(i, s), Ui.lp(t = 12))
+        if (recipe.notes.isNotBlank()) {
+            // Recette Cookomix : ce qui a été adapté pour le MCC, et l'adresse de la page d'origine.
+            steps.addView(section(tr("À savoir")), Ui.lp(t = 22))
+            steps.addView(Ui.text(c, recipe.notes, 16f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f) }, Ui.lp(t = 10))
+        }
         McOnline.apiIdOf(recipe.id)?.let { apiId ->
             steps.addView(reviewsBox, Ui.lp(t = 22))
             reviewsBox.addView(section(if (recipe.ratingCount > 0)

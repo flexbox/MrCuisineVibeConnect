@@ -181,6 +181,24 @@ object Ui {
         return t
     }
 
+    /** Onglets (segments) : un seul choisi parmi [labels]. */
+    fun tabs(c: Context, labels: List<String>, selected: Int, onPick: (Int) -> Unit): LinearLayout {
+        val row = horizontal(c)
+        row.background = round(SURFACE, 40f, STROKE, 1f)
+        row.setPadding(u(4), u(4), u(4), u(4))
+        for ((i, label) in labels.withIndex()) {
+            val sel = i == selected
+            val t = text(c, label, 17f, if (sel) 0xFF1A0E05.toInt() else TEXT2, MEDIUM)
+            t.gravity = android.view.Gravity.CENTER
+            t.setPadding(u(20), u(10), u(20), u(10))
+            t.background = pressable(if (sel) round(ACCENT, 36f) else round(0, 36f), 36f)
+            t.isClickable = true
+            t.setOnClickListener { if (!sel) onPick(i) }
+            row.addView(t)
+        }
+        return row
+    }
+
     fun card(c: Context, radius: Float = 24f, color: Int = SURFACE): LinearLayout = vertical(c).apply {
         background = round(color, radius)
         setPadding(u(20), u(18), u(20), u(18))

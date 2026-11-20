@@ -51,6 +51,7 @@ class MainActivity : Activity() {
     private var tone: ToneGenerator? = null
     private var toastView: TextView? = null
     private var lastKnobMs = 0L
+    private lateinit var standby: Standby
     var knobListener: ((KeyEvent) -> Unit)? = null
 
     val prefs: Prefs get() = app.prefs
@@ -69,7 +70,7 @@ class MainActivity : Activity() {
         root.setBackgroundColor(Ui.BG)
         val column = Ui.vertical(this)
         topBar = TopBar(this)
-        column.addView(topBar, Ui.lp(Ui.MATCH, Ui.u(60)))
+        column.addView(topBar, Ui.lp(Ui.MATCH, Ui.u(72)))
         content = FrameLayout(this)
         column.addView(content, Ui.lp(Ui.MATCH, 0, 1f))
         machineBar = MachineBar(this)
@@ -78,6 +79,7 @@ class MainActivity : Activity() {
         overlay = FrameLayout(this)
         overlay.visibility = View.GONE
         root.addView(overlay, Ui.flp())
+        standby = Standby(this, root, prefs, app.log) { snapshot }
         setContentView(root)
 
         try {
@@ -108,9 +110,11 @@ class MainActivity : Activity() {
             topBar.update(s)
             machineBar.update(s)
             stack.lastOrNull()?.onSnapshot(s)
+            standby.onSnapshot(s)
         }
         unsubscribeEvents = app.machine.onEvent { e -> onMachineEvent(e) }
         topBar.startClock()
+        standby.start()
     }
 
     override fun onResume() {
@@ -125,6 +129,7 @@ class MainActivity : Activity() {
         unsubscribe?.invoke()
         unsubscribeEvents?.invoke()
         topBar.stopClock()
+        standby.stop()
         super.onStop()
     }
 
@@ -205,37 +210,89 @@ class MainActivity : Activity() {
 
     // ------------------------------------------------------------------ bouton rotatif
 
+    // ------------------------------------------------------------------ mise en veille
+
+    /** Toucher l'écran en veille ne fait que le réveiller (le geste entier est absorbé). */
+    private var swallowGesture = false
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            swallowGesture = standby.sleeping
+            standby.interact()
+        }
+        if (swallowGesture) return true
+        return super.dispatchTouchEvent(ev)
+    }
+
+    /**
+     * Le bouton rotatif réveille l'écran : comme pour un toucher, la suite du même geste (crans
+     * suivants, appui maintenu) est absorbée, jusqu'à une courte pause.
+     */
+    private var knobWakeUntil = 0L
+
+    private fun knobWakes(): Boolean {
+        val now = android.os.SystemClock.elapsedRealtime()
+        val sameGesture = now < knobWakeUntil
+        if (!standby.sleeping && !sameGesture) return false
+        if (!sameGesture) standby.interact()
+        knobWakeUntil = now + KNOB_WAKE_MS
+        return true
+    }
+
+    /** Diaporama de la veille lancé à la main (Réglages). */
+    fun startPhotoFrame() {
+        if (!standby.startPhotos()) toast(tr("Pas de diaporama pendant un programme, une alerte ou une synchro."), Ui.WARN)
+    }
+
+    /** Touche du bouton rotatif : -1 ou +1 pour un cran à gauche ou à droite, 0 pour un appui ; null sinon. */
+    private fun knobKey(k: Int): Int? = when {
+        prefs.knobLeft.let { if (it >= 0) it == k else k == KeyEvent.KEYCODE_DPAD_LEFT } -> -1
+        prefs.knobRight.let { if (it >= 0) it == k else k == KeyEvent.KEYCODE_DPAD_RIGHT } -> 1
+        prefs.knobPress.let { if (it >= 0) it == k else k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER } -> 0
+        else -> null
+    }
+
+    /** Cran du bouton rotatif reçu comme défilement (AXIS_SCROLL, ou AXIS_VSCROLL d'une molette) : -1, +1, ou 0 s'il est à ignorer. */
+    private fun knobScroll(event: MotionEvent): Int {
+        val v = event.getAxisValue(AXIS_SCROLL).let { if (it == 0f) -event.getAxisValue(MotionEvent.AXIS_VSCROLL) else it }
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (v == 0f || now - lastKnobMs <= 40) return 0
+        lastKnobMs = now
+        return if (v > 0) 1 else -1
+    }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val knob = knobKey(event.keyCode)
+        // Cadre photo : tourner le bouton fait défiler les photos au lieu de réveiller l'écran.
+        if (standby.showingPhotos && knob != null && knob != 0) {
+            if (event.action == KeyEvent.ACTION_DOWN) standby.turnPhotos(knob)
+            return true
+        }
+        if (knobWakes()) return true
+        standby.touched()
         knobListener?.let { l ->
             if (event.action == KeyEvent.ACTION_DOWN) l(event)
             return true
         }
         if (event.action == KeyEvent.ACTION_DOWN && overlay.visibility != View.VISIBLE) {
-            val k = event.keyCode
-            val left = prefs.knobLeft.let { if (it >= 0) it == k else k == KeyEvent.KEYCODE_DPAD_LEFT }
-            val right = prefs.knobRight.let { if (it >= 0) it == k else k == KeyEvent.KEYCODE_DPAD_RIGHT }
-            val press = prefs.knobPress.let {
-                if (it >= 0) it == k else k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER
-            }
             val s = current
-            if (s != null && currentFocus !is android.widget.EditText) {
-                if (left && s.onKnob(-1)) return true
-                if (right && s.onKnob(1)) return true
-                if (press && s.onKnobPress()) return true
+            if (s != null && knob != null && currentFocus !is android.widget.EditText) {
+                if (if (knob == 0) s.onKnobPress() else s.onKnob(knob)) return true
             }
         }
         return super.dispatchKeyEvent(event)
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        if (event.action == MotionEvent.ACTION_SCROLL && standby.showingPhotos) {
+            knobScroll(event).let { if (it != 0) standby.turnPhotos(it) }
+            return true
+        }
+        if (event.action == MotionEvent.ACTION_SCROLL && knobWakes()) return true
+        standby.touched()
         if (event.action == MotionEvent.ACTION_SCROLL) {
-            // Encodeur rotatif (AXIS_SCROLL) ou molette (AXIS_VSCROLL)
-            val v = event.getAxisValue(AXIS_SCROLL).let { if (it == 0f) -event.getAxisValue(MotionEvent.AXIS_VSCROLL) else it }
-            val now = System.currentTimeMillis()
-            if (v != 0f && now - lastKnobMs > 40) {
-                lastKnobMs = now
-                if (current?.onKnob(if (v > 0) 1 else -1) == true) return true
-            }
+            val step = knobScroll(event)
+            if (step != 0 && current?.onKnob(step) == true) return true
         }
         return super.dispatchGenericMotionEvent(event)
     }
@@ -243,12 +300,17 @@ class MainActivity : Activity() {
     // ------------------------------------------------------------------ évènements machine
 
     private fun onMachineEvent(e: MachineEvent) {
+        standby.wake() // fin de programme, couvercle, erreur… : l'écran se rallume pour le montrer
         current?.onEvent(e)
         when (e.type) {
             EventType.JOB_FINISHED -> chime(2)
             EventType.FAULT -> { chime(3); toast(e.message, Ui.DANGER) }
-            EventType.LID_OPENED -> if (snapshot.busy || snapshot.state != null) toast(tr("Couvercle ouvert : pause"), Ui.WARN)
-            EventType.JOB_PAUSED -> if (e.message != PauseReason.USER.label) toast(e.message, Ui.WARN)
+            // L'évènement arrive avant la mesure qui dit si c'est le couvercle ou tout le bol : le
+            // message attend les mesures suivantes (la base en envoie dix par seconde).
+            EventType.LID_OPENED -> if (snapshot.busy || snapshot.state != null) main.postDelayed({
+                if (snapshot.lidOpen) toast(if (snapshot.bowlRemoved) tr("Bol retiré : pause") else tr("Couvercle ouvert : pause"), Ui.WARN)
+            }, LID_TOAST_DELAY_MS)
+            EventType.JOB_PAUSED -> if (e.message != PauseReason.USER.label && e.message != PauseReason.LID.label) toast(e.message, Ui.WARN)
             EventType.TURBO_END -> toast(e.message, Ui.TEXT2)
             else -> Unit
         }
@@ -443,12 +505,18 @@ class MainActivity : Activity() {
 
         /** MotionEvent.AXIS_SCROLL (API 26), valeur fixe pour Android 6. */
         private const val AXIS_SCROLL = 26
-        private val clockFormat = SimpleDateFormat("HH:mm", Locale.FRANCE)
 
-        /** Heure affichée ; le fuseau peut changer en cours de route (réglage automatique). */
-        fun now(): String {
-            clockFormat.timeZone = java.util.TimeZone.getDefault()
-            return clockFormat.format(Date())
+        /** Heure affichée (« --:-- » tant qu'elle n'est pas confirmée depuis le démarrage). */
+        fun now(): String = app.toque.TimeSync.clock()
+
+        /** Date du jour (« Vendredi 20 novembre ») ; vide tant que l'heure n'est pas réglée. */
+        fun today(): String {
+            if (!app.toque.TimeSync.trusted) return ""
+            return SimpleDateFormat(tr("EEEE d MMMM"), I18n.locale).format(Date()).replaceFirstChar { it.uppercaseChar() }
         }
+
+        /** Délai avant le message « couvercle ouvert » ou « bol retiré » (quelques mesures de la base). */
+        private const val LID_TOAST_DELAY_MS = 400L
+        private const val KNOB_WAKE_MS = 600L
     }
 }

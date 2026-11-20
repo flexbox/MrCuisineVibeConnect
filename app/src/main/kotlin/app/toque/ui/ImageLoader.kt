@@ -24,6 +24,8 @@ object ImageLoader {
         val key = file.absolutePath + "@" + targetWidth
         cache.get(key)?.let { view.setImageBitmap(it); return }
         exec.execute {
+            // Liste défilée entre-temps : la vignette n'est plus attendue par cette vue.
+            if (view.tag != file.absolutePath) return@execute
             val bmp = decode(file, targetWidth) ?: return@execute
             cache.put(key, bmp)
             main.post { if (view.tag == file.absolutePath) view.setImageBitmap(bmp) }

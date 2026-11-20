@@ -273,10 +273,13 @@ C'est fini.
 3. Bol vide, couvercle fermé, **main près de l'interrupteur** :
    - Cuisson manuelle : 10 s, vitesse 2 → le moteur tourne puis s'arrête seul.
    - Ouvrir le couvercle pendant un essai → arrêt immédiat, « Pause : couvercle ouvert ».
-   - 30 s à 37 °C, vitesse 1 → la température affichée monte.
+   - 30 s à 37 °C, vitesse 1 → une température apparaît en haut et monte (à froid, la base n'en
+     donne pas et Toque n'affiche rien plutôt que 0 °C).
    - Balance : poser un objet de poids connu, Tare.
-   - Diagnostic : retirer le bol et regarder « Bol détecté ». S'il change bien, vous pouvez
-     activer Réglages › Sécurité › « Exiger la détection du bol ».
+   - Retirer le bol : la barre du haut doit afficher **« Bol retiré »**, et Réglages › Sécurité
+     « Capteur : bol non détecté » (et « bol détecté » bol remis, couvercle ouvert ou fermé). Si
+     c'est le cas, vous pouvez activer « Exiger la détection du bol ». Vérifié sur un SKMC 1200
+     dont la base annonce la version 4922 ; sur une autre base, regardez avant de vous y fier.
 4. Au moindre comportement anormal : **interrupteur**, puis revenez à l'appli d'origine
    ([partie 6](#6-revenir-en-arrière)).
 
@@ -290,6 +293,16 @@ Autre source : **« Importer de l'appli d'origine »** copie les recettes déjà
 d'origine (elles remplacent celles du site). Si elle n'en a pas encore, **« Ouvrir l'appli
 d'origine »** la laisse se synchroniser avec les serveurs Lidl ; revenez avec le bouton **« Retour à Toque »**. Si cet import échoue, le fichier
 `Android/data/app.toque/files/diagnostic-recettes.txt` décrit la base d'origine.
+
+### Les recettes Cookomix
+
+**Réglages › Recettes Cookomix › Synchroniser Cookomix** (robot en Wi-Fi). Toque lit les recettes
+de cookomix.com, écrites pour le Thermomix, et garde celles que le MCC peut faire, avec leurs
+réglages convertis : une heure ou plus la première fois, ensuite seulement les nouvelles ou
+modifiées. Elles portent le mot-clé « Cookomix » (et « Adaptée MCC » quand un réglage a dû être
+adapté). Dans **Recettes**, les onglets **Tout / Lidl / Cookomix** séparent les deux sources et
+**« Catégories… »** liste toutes les catégories. Codes d'erreur CKX-01 à CKX-07 :
+[COOKOMIX-ERREURS.md](COOKOMIX-ERREURS.md).
 
 ### Au quotidien
 

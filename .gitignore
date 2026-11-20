@@ -21,5 +21,8 @@ Thumbs.db
 # Ne jamais publier de contenu Lidl (recettes, images, bases)
 Recipes
 Recipes-journal
+# (macOS ignore la casse : « Recipes » attraperait aussi les dossiers de code « recipes »)
+!app/src/main/kotlin/app/toque/recipes/
+!core/src/main/kotlin/app/toque/core/recipes/
 recipe_images/
 diagnostic-recettes.txt

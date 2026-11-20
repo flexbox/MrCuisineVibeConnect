@@ -150,6 +150,8 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
 
     private lateinit var startBtn: View
     private var turboBtn: HoldButton? = null
+    /** Étape en cours non lançable : refusée par la sécurité, ou réglage importé pas encore vérifié. */
+    private var blocked = false
     private var reviewBtn: View? = null
     private var panelState: TextView? = null
 
@@ -227,7 +229,10 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
         if (violations.isNotEmpty()) {
             panelInfo = tr("Réglage refusé par la sécurité : %s. Utilisez la cuisson manuelle.", violations.first().message)
         }
-        if (step.needsReview && index !in reviewed && violations.isEmpty()) {
+        // Relecture humaine d'un réglage importé (désactivable) ; les limites du MCC restent
+        // contrôlées par la sécurité de Toque dans tous les cas (violations ci-dessus, contrôleur).
+        val confirm = step.needsReview && a.prefs.confirmImported
+        if (confirm && index !in reviewed && violations.isEmpty()) {
             val rb = Ui.button(c, tr("J'ai vérifié ce réglage"), Ui.Style.GHOST, Icon.Kind.CHECK, height = 56, textSize = 17f) {
                 reviewed += index
                 buildPanel()
@@ -254,7 +259,7 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
                 a.push(ManualScreen(a, m))
             }, Ui.lp(t = 8))
         }
-        val blocked = violations.isNotEmpty() || (step.needsReview && index !in reviewed)
+        blocked = violations.isNotEmpty() || (confirm && index !in reviewed)
         Ui.setButtonEnabled(startBtn, !blocked)
     }
 
@@ -367,7 +372,7 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
             }
         }
         turboBtn?.let { t ->
-            t.isEnabled = !s.busy || s.turboActive
+            t.isEnabled = !blocked && (!s.busy || s.turboActive)
             t.alpha = if (t.isEnabled) 1f else 0.35f
         }
     }

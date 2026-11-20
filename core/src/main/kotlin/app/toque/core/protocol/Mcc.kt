@@ -44,6 +44,7 @@ class Telemetry(
     val errorCode: Int,
     val androidErrorCode: Int,
     val aboveTargetTemperature: Boolean,
+    /** Bit 0x40 de l'état, sous le nom que lui donne le SDK ; pour savoir si le bol est là, voir [bowlMissing]. */
     val bowlNtcDetected: Boolean,
     val lidOpen: Boolean,
     val extendedState: Int,
@@ -61,6 +62,13 @@ class Telemetry(
     val unknownByte24: Int,
     val warnings: List<String>,
 ) {
+    /**
+     * Le bol n'est pas sur la base. Mesuré sur un SKMC 1200 (base en version 4922) : le bit 0x40
+     * vaut 0 avec le bol en place, couvercle fermé ou ouvert, et 1 une fois le bol retiré. La
+     * température ne permet pas de le savoir : la base annonce 0 °C à froid dans les trois cas.
+     */
+    val bowlMissing: Boolean get() = bowlNtcDetected
+
     val targetSpeedLevelSigned: Int get() = if (targetSpeedLevel < 128) targetSpeedLevel else targetSpeedLevel - 256
     val targetTemperatureLevelSigned: Int get() = if (targetTemperatureLevel < 128) targetTemperatureLevel else targetTemperatureLevel - 256
     val unknownByte24Signed: Int get() = if (unknownByte24 < 128) unknownByte24 else unknownByte24 - 256

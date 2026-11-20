@@ -270,10 +270,13 @@ on**. Done.
 3. Empty bowl, lid closed, **hand near the power switch**:
    - Manual cooking: 10 s, speed 2 → the motor turns, then stops by itself.
    - Open the lid during a test → immediate stop, "Paused: lid open".
-   - 30 s at 37 °C, speed 1 → the displayed temperature rises.
+   - 30 s at 37 °C, speed 1 → a temperature appears at the top and rises (cold, the base gives
+     none and Toque shows nothing rather than 0 °C).
    - Scale: put an object of known weight on it, Tare.
-   - Diagnostics: take the bowl off and watch "Bowl detected". If it changes correctly, you can
-     turn on Settings › Safety › "Require bowl detection".
+   - Take the bowl off: the top bar must say **"Bowl removed"**, and Settings › Safety "Sensor:
+     bowl not detected" (and "bowl detected" with the bowl back, lid open or closed). If so, you
+     can turn on "Require bowl detection". Checked on an SKMC 1200 whose base reports version
+     4922; on another base, look before trusting it.
 4. At the slightest odd behaviour: **power switch**, then go back to the stock app
    ([part 6](#6-undo)).
 
@@ -287,6 +290,15 @@ Other source: **"Import from the stock app"** copies the recipes already in the 
 replace the ones from the site). If it has none yet, **"Open the stock app"** lets it sync with
 Lidl's servers; come back with the **"Back to Toque"** button. If that import fails, the file
 `Android/data/app.toque/files/diagnostic-recettes.txt` describes the stock database.
+
+### Cookomix recipes
+
+**Settings › Cookomix recipes › Sync Cookomix** (robot on Wi-Fi). Toque reads the cookomix.com
+recipes, written for the Thermomix, and keeps the ones the MCC can make, with their settings
+converted: an hour or more the first time, then only new or changed ones. They are tagged
+"Cookomix" (and "Adaptée MCC" when a setting had to be adapted). In **Recipes**, the
+**All / Lidl / Cookomix** tabs keep the two sources apart and **"Categories…"** lists every
+category. Error codes CKX-01 to CKX-07: [COOKOMIX-ERREURS.md](COOKOMIX-ERREURS.md) (in French).
 
 ### Every day
 

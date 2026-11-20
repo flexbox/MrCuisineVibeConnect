@@ -335,9 +335,11 @@ class MachineController(
             if (v.isEmpty()) v += Violation("stale", tr("Pas de mesure récente de la base"))
             return v
         }
-        if (t.lidOpen) v += Violation("lid", tr("Fermez et verrouillez le couvercle"))
+        if (t.lidOpen) v += Violation("lid",
+            if (t.bowlMissing) tr("Remettez le bol et verrouillez le couvercle")
+            else tr("Fermez et verrouillez le couvercle"))
         if (t.errorDetected) v += Violation("board_error", Mcc.boardErrorMessage(t.errorCode))
-        if (config.requireBowl && !t.bowlNtcDetected) v += Violation("bowl", tr("Bol non détecté"))
+        if (config.requireBowl && t.bowlMissing) v += Violation("bowl", tr("Bol non détecté"))
         return v
     }
 
@@ -641,7 +643,7 @@ class MachineController(
             scaleStable = t?.scaleStable ?: false,
             scaleState = t?.androidScaleState ?: "",
             lidOpen = t?.lidOpen ?: false,
-            bowlDetected = t?.bowlNtcDetected ?: false,
+            bowlDetected = t?.bowlMissing == false,
             motorOn = t?.motorOn ?: false,
             heaterOn = t?.heaterOn ?: false,
             boardErrorCode = if (t?.errorDetected == true) t.errorCode else 0,

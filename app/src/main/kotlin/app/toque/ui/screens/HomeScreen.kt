@@ -5,15 +5,12 @@ import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
 import app.toque.Prefs
-import app.toque.core.i18n.I18n
 import app.toque.core.i18n.tr
 import app.toque.core.machine.Snapshot
 import app.toque.ui.Icon
 import app.toque.ui.MainActivity
 import app.toque.ui.Screen
 import app.toque.ui.Ui
-import java.text.SimpleDateFormat
-import java.util.Date
 
 class HomeScreen(a: MainActivity) : Screen(a) {
     override val title = "Toque"
@@ -60,6 +57,18 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         resumeCard.addView(Icon(c, Icon.Kind.PLAY, Ui.ACCENT), LinearLayout.LayoutParams(Ui.u(26), Ui.u(26)).apply { rightMargin = Ui.u(14) })
         resumeText = Ui.ellipsize(Ui.text(c, "", 19f, Ui.TEXT, Ui.MEDIUM), 2)
         resumeCard.addView(resumeText, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
+        // Croix : oublier la recette commencée sans avoir à la terminer.
+        val forget = Ui.horizontal(c, android.view.Gravity.CENTER)
+        forget.addView(Icon(c, Icon.Kind.CLOSE, Ui.TEXT2), LinearLayout.LayoutParams(Ui.u(22), Ui.u(22)))
+        forget.background = Ui.pressable(Ui.round(0, 24f), 24f)
+        forget.contentDescription = tr("Ne plus proposer de reprendre cette recette")
+        forget.isClickable = true
+        forget.setOnClickListener {
+            a.prefs.guidedRecipe = ""
+            a.prefs.guidedStep = 0
+            refresh()
+        }
+        resumeCard.addView(forget, LinearLayout.LayoutParams(Ui.u(52), Ui.u(52)).apply { leftMargin = Ui.u(8) })
         resumeCard.isClickable = true
         resumeCard.setOnClickListener {
             val r = a.app.recipes.get(a.prefs.guidedRecipe)
@@ -110,8 +119,9 @@ class HomeScreen(a: MainActivity) : Screen(a) {
 
     private fun refreshClock() {
         clock.text = MainActivity.now()
-        date.text = SimpleDateFormat(tr("EEEE d MMMM"), I18n.locale).format(Date()).replaceFirstChar { it.uppercaseChar() }
-        val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        date.text = MainActivity.today().ifEmpty { tr("Réglage de l'heure…") }
+        // Heure pas encore réglée : pas de « Bonsoir » à 9 h du matin.
+        val h = if (app.toque.TimeSync.trusted) java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY) else 8
         greeting.text = when (h) {
             in 5..11 -> tr("Bonjour")
             in 12..17 -> tr("Bon après-midi")
@@ -124,8 +134,11 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         val n = repo.count
         recipesSub.text = when {
             !repo.loaded -> tr("Chargement…")
-            n == 0 -> tr("Aucune recette Lidl pour l'instant")
-            else -> tr("%d recettes Lidl", n)
+            n == 0 -> tr("Aucune recette pour l'instant")
+            else -> {
+                val ckx = repo.index.entries.count { app.toque.core.recipes.Origin.COOKOMIX.accepts(it.id) }
+                if (ckx == 0) tr("%d recettes Lidl", n) else tr("%d Lidl · %d Cookomix", n - ckx, ckx)
+            }
         }
         val favs = repo.index.entries.count { it.favorite }
         favSub.text = if (favs == 0) tr("Aucun favori") else if (favs == 1) tr("1 favori") else tr("%d favoris", favs)

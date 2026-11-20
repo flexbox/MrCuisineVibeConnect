@@ -83,6 +83,65 @@ class Prefs(context: Context) {
             p.edit().putBoolean("chainSteps", v).commit()
         }
 
+    /** Onglet de provenance des recettes (Tout / Lidl / Cookomix), mémorisé. */
+    var recipeOrigin: String
+        get() = p.getString("recipeOrigin", "ALL") ?: "ALL"
+        set(v) {
+            p.edit().putString("recipeOrigin", v).commit()
+        }
+
+    /** Cuisson manuelle : réglages par molettes tactiles (true) ou par boutons − / + (false). */
+    var manualDials: Boolean
+        get() = p.getBoolean("manualDials", false)
+        set(v) {
+            p.edit().putBoolean("manualDials", v).commit()
+        }
+
+    /** Mise en veille de l'écran après ce nombre de minutes sans contact (0 : jamais). */
+    var screenSleepMinutes: Int
+        get() = p.getInt("screenSleepMinutes", 10)
+        set(v) {
+            p.edit().putInt("screenSleepMinutes", v).commit()
+        }
+
+    /**
+     * Faire confirmer (« J'ai vérifié ce réglage ») chaque réglage machine importé d'une recette
+     * avant de pouvoir le lancer. Les règles de sécurité s'appliquent même désactivé.
+     */
+    var confirmImported: Boolean
+        get() = p.getBoolean("confirmImported", true)
+        set(v) {
+            p.edit().putBoolean("confirmImported", v).commit()
+        }
+
+    /** Pendant la veille : diaporama de l'album [photoAlbum] à la place de l'heure. */
+    var standbyPhotos: Boolean
+        get() = p.getBoolean("standbyPhotos", false)
+        set(v) {
+            p.edit().putBoolean("standbyPhotos", v).apply()
+        }
+
+    /** Code du lien de partage de l'album Google Photos (photos.app.goo.gl/<code>), vide si aucun. */
+    var photoAlbum: String
+        get() = p.getString("photoAlbum", "") ?: ""
+        set(v) {
+            p.edit().putString("photoAlbum", v).apply()
+        }
+
+    /** Durée d'affichage d'une photo, en secondes. */
+    var photoSeconds: Int
+        get() = p.getInt("photoSeconds", 20)
+        set(v) {
+            p.edit().putInt("photoSeconds", v).apply()
+        }
+
+    /** Luminosité de l'écran pendant le diaporama, en pour cent. */
+    var photoBrightness: Int
+        get() = p.getInt("photoBrightness", 40)
+        set(v) {
+            p.edit().putInt("photoBrightness", v).apply()
+        }
+
     var sound: Boolean
         get() = p.getBoolean("sound", true)
         set(v) {
@@ -107,6 +166,34 @@ class Prefs(context: Context) {
         get() = p.getBoolean("autoSync", true)
         set(v) {
             p.edit().putBoolean("autoSync", v).commit()
+        }
+
+    /** Synchro Lidl commencée et pas terminée (appli arrêtée en cours) : reprise au démarrage. */
+    var lidlSyncPending: Boolean
+        get() = p.getBoolean("lidlSyncPending", false)
+        set(v) {
+            p.edit().putBoolean("lidlSyncPending", v).commit()
+        }
+
+    /** Synchro Cookomix commencée et pas terminée : reprise au démarrage. */
+    var cookomixSyncPending: Boolean
+        get() = p.getBoolean("cookomixSyncPending", false)
+        set(v) {
+            p.edit().putBoolean("cookomixSyncPending", v).commit()
+        }
+
+    /** Reprises automatiques consécutives de la synchro Lidl qui ne se termine pas (évite une boucle). */
+    var lidlResumes: Int
+        get() = p.getInt("lidlResumes", 0)
+        set(v) {
+            p.edit().putInt("lidlResumes", v).commit()
+        }
+
+    /** Reprises automatiques consécutives de la synchro Cookomix qui ne se termine pas. */
+    var cookomixResumes: Int
+        get() = p.getInt("cookomixResumes", 0)
+        set(v) {
+            p.edit().putInt("cookomixResumes", v).commit()
         }
 
     var lastSyncMs: Long
@@ -189,4 +276,33 @@ class Prefs(context: Context) {
         set(v) {
             p.edit().putInt("guidedStep", v).commit()
         }
+
+    // ---- Cookomix
+
+    /** Synchro nocturne des recettes Cookomix (désactivée tant que l'utilisateur ne l'a pas lancée une fois). */
+    var cookomixAutoSync: Boolean
+        get() = p.getBoolean("cookomixAutoSync", false)
+        set(v) {
+            p.edit().putBoolean("cookomixAutoSync", v).commit()
+        }
+
+    /** Importer aussi les recettes dont un réglage a dû être adapté au MCC. */
+    var cookomixAdapted: Boolean
+        get() = p.getBoolean("cookomixAdapted", true)
+        set(v) {
+            p.edit().putBoolean("cookomixAdapted", v).commit()
+        }
+
+    var cookomixLastResult: String
+        get() = p.getString("cookomixLastResult", "") ?: ""
+        set(v) {
+            p.edit().putString("cookomixLastResult", v).commit()
+        }
+
+    var cookomixLastSyncMs: Long
+        get() = p.getLong("cookomixLastSyncMs", 0)
+        set(v) {
+            p.edit().putLong("cookomixLastSyncMs", v).commit()
+        }
+
 }

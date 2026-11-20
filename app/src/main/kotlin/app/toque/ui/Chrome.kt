@@ -56,21 +56,22 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
     init {
         orientation = HORIZONTAL
         setGravity(Gravity.CENTER_VERTICAL)
-        setPadding(Ui.u(10), 0, Ui.u(18), 0)
+        setPadding(Ui.u(4), 0, Ui.u(8), 0)
         setBackgroundColor(Ui.BG)
-        back.setPadding(Ui.u(10), Ui.u(10), Ui.u(10), Ui.u(10))
-        back.background = Ui.pressable(Ui.round(0, 30f), 30f)
+        // Boutons larges pour le doigt (toute la hauteur de la barre), icône de 30 au centre.
+        back.setPadding(Ui.u(19), Ui.u(19), Ui.u(19), Ui.u(19))
+        back.background = Ui.pressable(Ui.round(0, 34f), 34f)
         back.setOnClickListener { a.back() }
-        addView(back, LayoutParams(Ui.u(52), Ui.u(52)))
+        addView(back, LayoutParams(Ui.u(68), Ui.u(68)))
         addView(titleView, LayoutParams(0, Ui.WRAP, 1f).apply { leftMargin = Ui.u(6) })
         addView(lid, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
         addView(temp, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
         addView(link, Ui.lp(Ui.WRAP, Ui.WRAP, r = 16))
         addView(clock, Ui.lp(Ui.WRAP, Ui.WRAP, r = 6))
-        home.setPadding(Ui.u(10), Ui.u(10), Ui.u(10), Ui.u(10))
-        home.background = Ui.pressable(Ui.round(0, 30f), 30f)
+        home.setPadding(Ui.u(19), Ui.u(19), Ui.u(19), Ui.u(19))
+        home.background = Ui.pressable(Ui.round(0, 34f), 34f)
         home.setOnClickListener { a.home() }
-        addView(home, LayoutParams(Ui.u(52), Ui.u(52)))
+        addView(home, LayoutParams(Ui.u(68), Ui.u(68)))
         lid.visibility = View.GONE
         temp.visibility = View.GONE
         // Accès caché aux réglages Android : 5 appuis rapides sur l'heure.
@@ -93,13 +94,17 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
 
     fun setTitle(t: String, canGoBack: Boolean) {
         titleView.text = t
-        back.visibility = if (canGoBack) View.VISIBLE else View.INVISIBLE
+        // Sans bouton Retour (accueil), le titre s'aligne sur le contenu de la page.
+        back.visibility = if (canGoBack) View.VISIBLE else View.GONE
+        (titleView.layoutParams as LayoutParams).leftMargin = Ui.u(if (canGoBack) 6 else 24)
+        titleView.requestLayout()
         home.visibility = if (canGoBack) View.VISIBLE else View.GONE
     }
 
     fun update(s: Snapshot) {
         lid.visibility = if (s.hasSample && s.lidOpen) View.VISIBLE else View.GONE
-        if (s.hasSample) {
+        Ui.chipText(lid).text = if (s.bowlRemoved) tr("Bol retiré") else tr("Couvercle ouvert")
+        if (s.temperatureKnown) {
             temp.visibility = View.VISIBLE
             Ui.chipText(temp).text = "${s.actualTempC} °C"
             val col = if (s.actualTempC >= 40) Ui.tempColor(s.actualTempC) else Ui.TEXT2
@@ -239,7 +244,7 @@ class MachineBar(private val a: MainActivity) : FrameLayout(a) {
             JobState.RUNNING -> if (s.waitingStop) tr("Changement de sens…") else if (s.phaseCount > 1) tr("En cours · phase %d/%d", s.phaseIndex + 1, s.phaseCount) else tr("En cours")
             JobState.STOPPING -> tr("Arrêt du moteur…")
             JobState.PAUSED -> when (s.pauseReason) {
-                "LID" -> tr("Pause : couvercle ouvert")
+                "LID" -> if (s.bowlRemoved) tr("Pause : bol retiré") else tr("Pause : couvercle ouvert")
                 "SAFETY" -> tr("Interrompu par sécurité")
                 else -> tr("En pause")
             }

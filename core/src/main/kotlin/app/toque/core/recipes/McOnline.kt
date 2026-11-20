@@ -284,8 +284,13 @@ object McOnline {
         val t = html
             .replace(Regex("(?i)<br\\s*/?>|</p>|</li>"), "\n")
             .replace(Regex("<[^>]+>"), "")
-            .replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+            .replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">")
             .replace("&quot;", "\"").replace("&#39;", "'").replace("&rsquo;", "’")
+            .replace(Regex("&#(\\d{2,7});")) { m ->
+                val cp = m.groupValues[1].toInt()
+                if (Character.isValidCodePoint(cp)) String(Character.toChars(cp)) else m.value
+            }
+            .replace("&amp;", "&")
             .lines().joinToString("\n") { it.replace(Regex("[ \\t\u00a0]{2,}"), " ").trim() }
             .replace(Regex("\n{3,}"), "\n\n")
             .trim()
