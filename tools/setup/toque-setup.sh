@@ -5,6 +5,8 @@
 #   tools/setup/toque-setup.sh status
 #
 # Steps, in order: status, prepare, backup, flash-twrp, root, flash-root, android, install, wifi.
+# SKMC 1100 A1 only: one more step, own-twrp, right after backup (see AGENTS.md). It builds, on
+# this computer, the guide's TWRP around the robot's own kernel (port of Wuki60 v0.7.1, issue #10).
 # 'unroot' puts the original boot and recovery back. Lines starting with "HUMAN:" are actions only a
 # person can do (unscrewing, cables, power switch, a macOS prompt, a tap on the robot's screen).
 # A step that needs one stops and says so; run it again once the person is done.
@@ -26,11 +28,12 @@
 # 180), --mtk-timeout N (download mode, default 1800), --libusb / --serial (how mtkclient talks to
 # the robot: libusb, or the system's serial driver; default --serial on macOS, --libusb on Linux),
 # --download-mode ('unroot' through download mode instead of TWRP), --no-udev-check (Linux: USB
-# access is set up another way than with tools/setup/51-toque-robot.rules).
+# access is set up another way than with tools/setup/51-toque-robot.rules), --guide-twrp
+# ('flash-twrp' writes the guide's TWRP although its kernel differs from the robot's: SKMC 1200).
 set -u
 set -o pipefail
 
-STEPS="status prepare backup flash-twrp root flash-root android install wifi unroot"
+STEPS="status prepare backup own-twrp flash-twrp root flash-root android install wifi unroot"
 STEP=""
 WORK=""
 APK=""
@@ -40,10 +43,12 @@ MTK_TIMEOUT=1800
 MTK_SERIAL=""  # 1: serial driver, 0: libusb. Default set below, by system.
 UDEV_CHECK=1
 DOWNLOAD_MODE=0
+GUIDE_TWRP=0
 
 usage() {
   echo "Usage: tools/setup/toque-setup.sh <step> [--work DIR] [--apk FILE] [--ip ROBOT_IP]"
   echo "       [--wait-seconds N] [--mtk-timeout N] [--libusb | --serial] [--download-mode] [--no-udev-check]"
+  echo "       [--guide-twrp]"
   echo "Steps: $STEPS"
 }
 opt_value() { [ $# -ge 2 ] && [ -n "$2" ] || { echo "Option $1 needs a value." >&2; usage >&2; exit 1; }; }
@@ -59,6 +64,7 @@ while [ $# -gt 0 ]; do
     --libusb) MTK_SERIAL=0; shift ;;
     --download-mode) DOWNLOAD_MODE=1; shift ;;
     --no-udev-check) UDEV_CHECK=0; shift ;;
+    --guide-twrp) GUIDE_TWRP=1; shift ;;
     -h | --help) usage; exit 0 ;;
     -*) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
     *)
@@ -99,6 +105,8 @@ MTK_RUN="$WORK/mtkclient/run"
 MTK_PATCH="$REPO/tools/setup/mtkclient-macos-serial.patch"
 UDEV_RULE="$REPO/tools/setup/51-toque-robot.rules"
 UDEV_INSTALLED="/etc/udev/rules.d/51-toque-robot.rules"
+BOOTIMG_TOOL="$REPO/tools/setup/bootimg_tool.py"
+OWN_TWRP="$WORK/twrp-own-kernel.img"
 
 # Known-good files (SHA-256). The scatter and TWRP come from github.com/EliasKotlyar/Monsieur-Cuisine-Connect-Hack.
 MAGISK_URL="https://github.com/topjohnwu/Magisk/releases/download/v31.0/Magisk-v31.0.apk"
@@ -208,6 +216,27 @@ check_boot_image() { # check_boot_image <file> <name>
 check_twrp() {
   [ -f "$HACK/recovery.img" ] && [ "$(sha "$HACK/recovery.img")" = "$TWRP_SHA" ] ||
     fail "TWRP ($HACK/recovery.img) missing or checksum mismatch: run 'prepare'."
+}
+# The TWRP image the flash steps write, in $TWRP_IMG: the one built by 'own-twrp' (SKMC 1100 A1),
+# else the guide's. (Not through $(...): fail must stop the script, not a subshell.)
+TWRP_IMG=""
+select_twrp() {
+  local want
+  want=$(state_get twrp-own-kernel-sha256)
+  if [ -n "$want" ]; then
+    [ -f "$OWN_TWRP" ] || fail "twrp-own-kernel.img is missing: run 'own-twrp' again."
+    [ "$(sha "$OWN_TWRP")" = "$want" ] || fail "twrp-own-kernel.img does not match the checksum recorded by 'own-twrp': run 'own-twrp' again."
+    TWRP_IMG=$OWN_TWRP
+  else
+    check_twrp
+    TWRP_IMG="$HACK/recovery.img"
+  fi
+}
+# Offline helper (tools/setup/bootimg_tool.py) with the system Python, isolated mode.
+bootimg_tool() {
+  local py
+  py=$(find_python) || fail "Python 3.10 or newer is needed. $(pkg_hint python)"
+  "$py" -I "$BOOTIMG_TOOL" "$@"
 }
 
 # boot and recovery offsets and sizes in the scatter file must be the ones this script writes to.
@@ -412,6 +441,13 @@ twrp_write() { # twrp_write <partition> <image> <allowed> [<partition> <image> <
 # "size:sha256" of the possible contents of a partition (what twrp-flash.sh accepts).
 content_of() { printf '%s:%s' "$(fsize "$1")" "$(sha "$1")"; }
 twrp_content() { printf '%s:%s' "$TWRP_SIZE" "$TWRP_SHA"; }
+# What 'flash-twrp' may have left in boot: the guide's TWRP and, if built, the own-kernel one.
+any_twrp_content() {
+  local c
+  c=$(twrp_content)
+  [ -f "$OWN_TWRP" ] && c="$c,$(content_of "$OWN_TWRP")"
+  printf '%s' "$c"
+}
 
 # How to install a missing tool, by system.
 pkg_hint() { # pkg_hint python|libusb|git
@@ -473,8 +509,17 @@ step_status() {
   fi
   if mtk_ready; then say "mtkclient: $MTK_TAG + macOS serial fixes, through $([ "$MTK_SERIAL" = 1 ] && echo "the serial driver" || echo libusb)"; else say "mtkclient: not installed or not patched ('prepare')"; fi
   if ADB=$(find_adb); then say "adb state: $(adb_state)"; else ADB=""; say "adb: missing ('prepare')"; fi
+  if state_has twrp-own-kernel-sha256; then say "TWRP for the flash steps: twrp-own-kernel.img (built by 'own-twrp' around this robot's kernel)"
+  else say "TWRP for the flash steps: hack/recovery.img (the guide's)"; fi
   for o in prepare backup flash-twrp root flash-root android install wifi; do
-    state_has "done-$o" || { say "Next step: $o"; return; }
+    if ! state_has "done-$o"; then
+      if [ "$o" = flash-twrp ] && ! state_has done-own-twrp; then
+        say "Next step: own-twrp (SKMC 1100 A1), then flash-twrp"
+      else
+        say "Next step: $o"
+      fi
+      return
+    fi
   done
   say "Everything is done."
 }
@@ -560,10 +605,20 @@ step_backup() {
     check_layout
     human "Switch the robot OFF with its rear switch (it can stay plugged into the mains). Unscrew the maintenance cover under the robot (small Torx). Plug the USB A-A cable into the RIGHT-HAND port marked 'Android USB' (never the other one: it can destroy the board) and into the $HOST."
     usb_hint
-    rm -f "$MTK_RUN/boot-original.img" "$MTK_RUN/recovery-original.img"
-    run_mtk_session backup "ro $BOOT_OFFSET $(hex $PARTITION_SIZE) boot-original.img --parttype user;ro $RECOVERY_OFFSET $(hex $PARTITION_SIZE) recovery-original.img --parttype user"
+    rm -f "$MTK_RUN/boot-original.img" "$MTK_RUN/recovery-original.img" "$MTK_RUN"/gpt-*.bin
+    # Read only. The first MiB of EMMC_USER (partition table) twice, then boot and recovery; the
+    # partition table is checked on this computer before the backups are accepted.
+    run_mtk_session backup "ro 0x0 0x100000 gpt-a.bin --parttype user;ro 0x0 0x100000 gpt-b.bin --parttype user;ro $BOOT_OFFSET $(hex $PARTITION_SIZE) boot-original.img --parttype user;ro $RECOVERY_OFFSET $(hex $PARTITION_SIZE) recovery-original.img --parttype user"
     [ -f "$MTK_RUN/boot-original.img" ] && [ -f "$MTK_RUN/recovery-original.img" ] ||
       fail "Readback produced no files (see $MTK_OUT). Nothing was written to the robot. Switch the robot OFF (after a failed session it stays in download mode, black screen), check the cable and port, then run 'backup' again (see AGENTS.md, 'When mtkclient does not reach the robot')."
+    [ -f "$MTK_RUN/gpt-a.bin" ] && [ -f "$MTK_RUN/gpt-b.bin" ] ||
+      fail "The partition table was not read (see $MTK_OUT). Nothing was written to the robot. Switch the robot OFF and run 'backup' again."
+    mkdir -p "$BACKUP"
+    bootimg_tool gpt "$MTK_RUN/gpt-a.bin" "$MTK_RUN/gpt-b.bin" "$BOOT_OFFSET" "$RECOVERY_OFFSET" "$PARTITION_SIZE" | tee "$BACKUP/partition-table.txt"
+    grep -q '^OK: GPT valid' "$BACKUP/partition-table.txt" ||
+      fail "The partition table does not match the offsets this script uses (above, also in $BACKUP/partition-table.txt). Nothing was written to the robot. Do not flash: report it."
+    mv "$MTK_RUN/gpt-a.bin" "$BACKUP/emmc-user-first-mib.bin"
+    rm -f "$MTK_RUN/gpt-b.bin"
     # Checked where mtkclient wrote them: a bad readback never lands in the backup folder.
     check_boot_image "$MTK_RUN/boot-original.img" "the boot readback"
     check_boot_image "$MTK_RUN/recovery-original.img" "the recovery readback"
@@ -580,16 +635,57 @@ step_backup() {
   state_set done-backup "$(now)"
   ok "Backups verified (16 MiB Android boot images). Keep $BACKUP safe: it is the only way back."
   human "Copy the folder $BACKUP to a second place (USB stick, cloud)."
-  ok "backup done. Next: flash-twrp"
+  say "Robot kernel: $(bootimg_tool kernel-version "$boot")"
+  ok "backup done. Next: own-twrp (SKMC 1100 A1), or flash-twrp (SKMC 1200)"
+}
+
+# SKMC 1100 A1: its kernel (2022) is newer than the one inside the guide's TWRP (2018). Builds, on
+# this computer, the guide's TWRP (header and ramdisk, unchanged) around the robot's own kernel and
+# device tree, taken from the boot backup. Nothing is sent to the robot; flash-twrp and flash-root
+# then write this image instead of hack/recovery.img. Port of Step-OwnTwrp (Wuki60 v0.7.1).
+step_own_twrp() {
+  local boot="$BACKUP/boot-original.img" code len
+  state_has done-backup || fail "Run 'backup' first: the image is built from the robot's own boot backup."
+  check_boot_image "$boot" "boot-original.img"
+  [ "$(sha "$boot")" = "$(state_get boot-original-sha256)" ] ||
+    fail "boot-original.img no longer matches the checksum recorded by 'backup': do not continue."
+  check_twrp
+  rm -f "$OWN_TWRP.tmp"
+  bootimg_tool own-twrp "$boot" "$HACK/recovery.img" "$OWN_TWRP.tmp"
+  code=$?
+  if [ "$code" = 10 ]; then
+    rm -f "$OWN_TWRP.tmp"
+    ok "The guide's TWRP already carries this robot's kernel: nothing to build. Next: flash-twrp"
+    return
+  fi
+  [ "$code" = 0 ] && [ -f "$OWN_TWRP.tmp" ] || { rm -f "$OWN_TWRP.tmp"; fail "own-twrp did not build an image (above): nothing to flash."; }
+  len=$(fsize "$OWN_TWRP.tmp")
+  [ "$len" -le "$PARTITION_SIZE" ] && [ $((len % 512)) -eq 0 ] ||
+    { rm -f "$OWN_TWRP.tmp"; fail "The built image ($len bytes) does not fit the partition."; }
+  mv "$OWN_TWRP.tmp" "$OWN_TWRP"
+  chmod a-w "$OWN_TWRP"
+  state_set twrp-own-kernel-sha256 "$(sha "$OWN_TWRP")"
+  state_set done-own-twrp "$(now)"
+  ok "TWRP with this robot's own kernel: $OWN_TWRP ($(fsize "$OWN_TWRP") bytes). 'flash-twrp' and 'flash-root' will write it instead of hack/recovery.img."
+  ok "own-twrp done. Next: flash-twrp"
 }
 
 step_flash_twrp() {
+  local code
   state_has done-backup || fail "Run 'backup' first: never flash without the backups."
-  check_twrp
+  select_twrp
+  if [ "$TWRP_IMG" != "$OWN_TWRP" ] && [ "$GUIDE_TWRP" = 0 ]; then
+    # The guide's TWRP carries a 2018 kernel. On an SKMC 1100 A1 (2022 kernel) build 'own-twrp' first.
+    bootimg_tool same-kernel "$BACKUP/boot-original.img" "$HACK/recovery.img"
+    code=$?
+    [ "$code" = 10 ] ||
+      fail "The robot's kernel differs from the one inside the guide's TWRP (above). SKMC 1100 A1: run 'own-twrp' first. SKMC 1200 (procedure tested with the guide's TWRP): run 'flash-twrp --guide-twrp'. Nothing was written."
+  fi
   mtk_require
   check_layout
-  mtk_write_verified flash-twrp boot "$HACK/recovery.img"
-  mtk_check_written boot "$HACK/recovery.img"
+  say "TWRP image: $TWRP_IMG ($(fsize "$TWRP_IMG") bytes, SHA-256 $(sha "$TWRP_IMG"))"
+  mtk_write_verified flash-twrp boot "$TWRP_IMG"
+  mtk_check_written boot "$TWRP_IMG"
   state_set done-flash-twrp "$(now)"
   human "Switch the robot OFF, UNPLUG the USB cable, switch it ON: TWRP (a blue/black recovery screen) appears. If it asks 'Keep System Read only?', tap 'Keep Read Only'. Then plug the cable back in. (Switched on with the cable in, the robot stops on a battery screen.)"
   ok "flash-twrp done. Next: root (with TWRP on the robot's screen)"
@@ -625,15 +721,15 @@ step_flash_root() {
   check_boot_image "$patched" "boot-magisk.img"
   [ "$(sha "$patched")" = "$(state_get boot-magisk-sha256)" ] || fail "boot-magisk.img changed since 'root': run 'root' again."
   check_boot_image "$rec" "recovery-original.img"
-  check_twrp
+  select_twrp
   resolve_adb
   st=$(wait_adb_state "$WAIT_SECONDS" recovery)
   [ "$st" = recovery ] || need_human "adb does not see TWRP (state: '$st'). The robot must show TWRP and the cable must be plugged in AFTER it started."
   # TWRP into recovery first, then the Magisk boot. Before: recovery is stock (or already TWRP),
   # boot is TWRP (or already the Magisk boot); anything else and nothing is written.
   twrp_write \
-    recovery "$HACK/recovery.img" "$(content_of "$rec"),$(twrp_content)" \
-    boot "$patched" "$(twrp_content),$(content_of "$patched")"
+    recovery "$TWRP_IMG" "$(content_of "$rec"),$(any_twrp_content)" \
+    boot "$patched" "$(any_twrp_content),$(content_of "$patched")"
   state_set done-flash-root "$(now)"
   human "Switch the robot OFF, UNPLUG the USB cable, switch it ON: the stock Monsieur Cuisine app starts. Then plug the cable back in."
   ok "flash-root done. Next: android"
@@ -720,7 +816,6 @@ step_unroot() {
     mtk_check_written boot "$boot"
     mtk_check_written recovery "$rec"
   else
-    check_twrp
     resolve_adb
     st=$(adb_state)
     if [ "$st" = device ]; then
@@ -733,11 +828,11 @@ step_unroot() {
     fi
     st=$(wait_adb_state "$WAIT_SECONDS" recovery)
     [ "$st" = recovery ] || need_human "adb does not see TWRP (state: '$st'). If the robot shows a battery screen: switch it off, unplug the cable, switch it on, plug the cable in. If nothing boots, use 'unroot --download-mode'."
-    boot_ok="$(content_of "$boot"),$(twrp_content)"
+    boot_ok="$(content_of "$boot"),$(any_twrp_content)"
     [ -f "$patched" ] && boot_ok="$boot_ok,$(content_of "$patched")"
     twrp_write \
       boot "$boot" "$boot_ok" \
-      recovery "$rec" "$(content_of "$rec"),$(twrp_content)"
+      recovery "$rec" "$(content_of "$rec"),$(any_twrp_content)"
   fi
   state_set done-unroot "$(now)"
   human "Switch the robot OFF, UNPLUG the USB cable, switch it ON: the stock Monsieur Cuisine app starts, without root and without TWRP."
@@ -751,6 +846,7 @@ case "$STEP" in
   status) step_status ;;
   prepare) step_prepare ;;
   backup) step_backup ;;
+  own-twrp) step_own_twrp ;;
   flash-twrp) step_flash_twrp ;;
   root) step_root ;;
   flash-root) step_flash_root ;;

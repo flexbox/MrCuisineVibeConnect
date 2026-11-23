@@ -60,8 +60,9 @@ instead of the Mac sentence above.
   what it does in one sentence and wait for *yes*.
 - When a step prints `STOP:`, do not improvise a workaround on the robot: read the cause, fix it
   on the Mac side or ask the person, then run the step again.
-- If the robot is not an SKMC 1200 Monsieur Cuisine **Connect** (for example a Monsieur Cuisine
-  **Smart**, SKMS 1200), stop: this procedure does not apply.
+- Check the model on the label under the robot. **SKMC 1200**: the procedure below. **SKMC 1100
+  A1**: one more step, `own-twrp`, right after `backup` (see *SKMC 1100 A1* below); not yet tried
+  from a Mac. A Monsieur Cuisine **Smart** (SKMS 1200) is different hardware: stop.
 
 ## What the person needs
 
@@ -119,7 +120,8 @@ step, have the person switch it off. `ls /dev/cu.usbmodem*` lists nothing once i
 |---|------|-----|--------------|
 | 0 | clone | agent | Get this repository on the Mac (git clone or a ZIP). |
 | 1 | `prepare` | agent | Downloads adb, Magisk v31.0, TWRP and the scatter file, the latest Toque APK, mtkclient v2.1.4.1 and its Python packages (into `~/Toque/mtkclient`); checks every SHA-256 and the mtkclient commit, applies the macOS serial fixes. Says which Homebrew packages are missing, if any. |
-| 2 | `backup` | person, then agent | Cover off, cable in the **right-hand "Android USB" port**, robot off; mtkclient reads `boot` and `recovery` when the person switches the robot on. Verifies two 16 MiB Android images before keeping them. |
+| 2 | `backup` | person, then agent | Cover off, cable in the **right-hand "Android USB" port**, robot off; mtkclient reads the partition table (twice), `boot` and `recovery` when the person switches the robot on. Checks the partition table (GPT CRCs, `boot` and `recovery` at the offsets the script uses) and the two 16 MiB Android images before keeping them; prints the robot's kernel version. Read only. |
+| 2b | `own-twrp` | agent | **SKMC 1100 A1 only.** Builds `~/Toque/twrp-own-kernel.img` on the Mac: the guide's TWRP with the robot's own kernel, taken from the `boot` backup. Nothing is sent to the robot; `flash-twrp` and `flash-root` then write that image. |
 | 3 | `flash-twrp` | agent + person | Writes TWRP into `boot` in download mode and reads it back. The person power-cycles: off, **unplug**, on, plug back → TWRP. The first time, TWRP asks *Keep System Read only?*: the person taps **Keep Read Only**. |
 | 4 | `root` | agent | In TWRP: patches the *original* boot with Magisk, enables ADB in Android, authorizes the Mac's ADB key, pulls `boot-magisk.img`. |
 | 5 | `flash-root` | agent | Still in TWRP: writes TWRP into `recovery` and `boot-magisk.img` into `boot`. Checks first that both partitions hold what they should (else writes nothing), reads each one back. Power cycle as above → stock app. |
@@ -129,6 +131,38 @@ step, have the person switch it off. `ls /dev/cu.usbmodem*` lists nothing once i
 | 9 | `wifi` | agent | ADB over Wi-Fi (port 5555), so the cable can go and the cover go back on. |
 
 Then: Toque › Settings › Lidl recipes › **Sync** (about 15 minutes the first time).
+
+### SKMC 1100 A1: TWRP with the robot's own kernel
+
+Port of the `own-twrp` step of [Wuki60/MrCuisineVibeConnect v0.7.1](https://github.com/Wuki60/MrCuisineVibeConnect/blob/v0.7.1/AGENTS.md#skmc-1100-a1-twrp-with-the-robots-own-kernel)
+(issue #10). The guide's TWRP carries a kernel built in April 2018; an SKMC 1100 A1 (system image
+`v4.3a_2022-09-15`, stock app 1.1.28) runs a kernel built in September 2022.
+
+- Run `own-twrp` once, after `backup` and before `flash-twrp`. It prints both kernel versions,
+  takes the kernel and device tree from `backup/boot-original.img` and everything else (TWRP
+  itself, the header) from `hack/recovery.img`, writes `twrp-own-kernel.img`, reads it back and
+  records its SHA-256 in `state.txt`. It downloads nothing, sends nothing to the robot, and refuses
+  to build if the two images do not share the same layout. The image building is done by
+  `tools/setup/bootimg_tool.py` (system Python, no packages).
+- `flash-twrp` and `flash-root` then write that image instead of `hack/recovery.img`; `status`
+  says which one is selected. To go back to the guide's image, delete the
+  `twrp-own-kernel-sha256` line from `state.txt`.
+- Without `own-twrp`, `flash-twrp` compares the robot's kernel with the one inside the guide's TWRP
+  and stops if they differ. On an SKMC 1200 whose kernel differs, `flash-twrp --guide-twrp` writes
+  the guide's TWRP as before.
+- As in the upstream guide, TWRP goes into `boot` first while `recovery` keeps the stock recovery,
+  and every write is read back. If TWRP does not start, `unroot --download-mode` puts the original
+  `boot` back.
+
+Upstream did this end to end on one SKMC 1100 A1 from Windows in November 2026. From a Mac, it was
+done once, on 23 November 2026, on another SKMC 1100 A1 (firmware 4924, kernel and device tree
+byte-identical to upstream's: 6,524,058 bytes, SHA-256 `fe40074a…8471`; MacBook Air, Intel). There,
+mtkclient was a manual install (not the one `prepare` sets up), so the download-mode reads and the
+TWRP write were run by hand with the same `ro`/`wo` commands this script uses, and the image was
+built with `bootimg_tool.py own-twrp` (11,513,856 bytes). TWRP started with a stable picture and
+working touch; `root`, `flash-root` (writing `twrp-own-kernel.img` into `recovery`), `android`,
+`install` (Toque 0.7.1) and `wifi` then ran from this script unchanged. Tell the person that the
+script's own `backup`/`own-twrp`/`flash-twrp` path has not itself been run on an SKMC 1100.
 
 ### Power-on rules (the source of most confusion)
 
@@ -210,6 +244,8 @@ and without macFUSE the FUSE package stops mtkclient from starting
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| SKMC 1100: Diagnostic shows 0 °C at rest and during the first minutes of heating | The base reports the temperature in steps (0, 37, 45, 50… °C), as with the stock app: 0 below 37 °C | Normal. Seen on an SKMC 1100 A1: 0 → 37 → 45 → 50 → 60 °C at a 60 °C setting, then the "above target" bit |
+| SKMC 1100: Diagnostic shows "0 tr/min" while the blade turns (speed 2) | The base sends the target speed (bytes 7–8) but leaves the actual speed (bytes 9–10) at 0 | Display only, as far as seen; not checked whether any Toque check relies on the actual speed |
 | mtkclient waits forever (*Waiting for device*) | A↔C cable, wrong port, USB-C port without adapter, or the robot was already on | A↔A cable, right-hand "Android USB" port, USB-C → USB-A adapter; robot off, then on while the step waits |
 | *Handshake failed, retrying...* every 10 s | Normal while mtkclient waits for the robot (serial driver) | Have the person switch the robot on, once |
 | mtkclient sees the robot, then *Sync error* or *Failed to upload da* | mtkclient without its macOS serial fixes, or the robot was already in download mode | `prepare`; robot off; run the step again; else the Windows fallback above |
